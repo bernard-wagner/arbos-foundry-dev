@@ -22,18 +22,19 @@ use alloy_eips::{
     eip7840::BlobParams,
 };
 use alloy_evm::{
-    EthEvm, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    FromRecoveredTx,
+    precompiles::{DynPrecompile, Precompile},
 };
+use foundry_evm::core::evm::{EthEvmContext, PrecompilesMap};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
+use crate::evm::AnvilEvm;
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::precompiles::EC_RECOVER,
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
@@ -484,7 +485,7 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> EitherEvm<DB, I, PrecompilesMap>
+) -> AnvilEvm<DB, I, PrecompilesMap<DB>>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -504,21 +505,15 @@ where
         error: Ok(()),
     };
 
-    let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
-    }
-    .precompiles;
-    let eth_evm = RevmEvm::new_with_inspector(
+    AnvilEvm(RevmEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
-        PrecompilesMap::from_static(eth_precompiles),
-    );
-
-    let eth = EthEvm::new(eth_evm, true);
-
-    EitherEvm(eth)
+        PrecompilesMap::new(EthPrecompiles {
+            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
+            spec,
+        }),
+    ))
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -526,7 +521,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

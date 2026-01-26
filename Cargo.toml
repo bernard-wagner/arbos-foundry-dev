@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "benches/",
+    "crates/alloy-evm/",
     "crates/anvil/",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
@@ -284,7 +285,7 @@ revm = { version = "33.0.0", default-features = false }
 revm-inspectors = { version = "0.33.0", features = ["serde"] }
 
 ## alloy-evm
-alloy-evm = "0.24.1"
+alloy-evm = { path = "crates/alloy-evm" }
 
 ## cli
 anstream = "0.6"

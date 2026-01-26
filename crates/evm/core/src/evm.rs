@@ -7,15 +7,14 @@ use crate::{
     Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{Evm, EvmEnv, eth::EthEvmContext, precompiles::PrecompilesMap};
+use alloy_evm::Database;
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
     Context, Journal,
     context::{
-        BlockEnv, CfgEnv, ContextTr, CreateScheme, Evm as RevmEvm, JournalTr, LocalContext,
-        LocalContextTr, TxEnv,
-        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
+        ContextTr, CreateScheme, JournalTr, LocalContextTr,
+        result::{EVMError, HaltReason, ResultAndState},
     },
     handler::{
         EthFrame, EthPrecompiles, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult,
@@ -30,6 +29,25 @@ use revm::{
     precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
+
+pub type BlockEnv = revm::context::BlockEnv;
+pub type CfgEnv<SPEC = SpecId> = revm::context::CfgEnv<SPEC>;
+pub type TxEnv = revm::context::TxEnv;
+pub type LocalContext = revm::context::LocalContext;
+
+pub type EthEvmContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
+pub type EvmEnv<SPEC = SpecId> = alloy_evm::EvmEnv<BlockEnv, CfgEnv<SPEC>>;
+pub type EthEvm<DB, I, P> = revm::context::Evm<
+    EthEvmContext<DB>,
+    I,
+    EthInstructions<EthInterpreter, EthEvmContext<DB>>,
+    P,
+    EthFrame<EthInterpreter>,
+>;
+pub type PrecompilesMap<DB> = alloy_evm::precompiles::PrecompilesMap<
+    EthEvmContext<DB>,
+    EthPrecompiles,
+>;
 
 pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     db: &'db mut dyn DatabaseExt,
@@ -53,7 +71,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     let spec = ctx.cfg.spec;
 
     let mut evm = FoundryEvm {
-        inner: RevmEvm::new_with_inspector(
+        inner: EthEvm::new_with_inspector(
             ctx,
             inspector,
             EthInstructions::default(),
@@ -72,7 +90,7 @@ pub fn new_evm_with_existing_context<'a>(
     let spec = ctx.cfg.spec;
 
     let mut evm = FoundryEvm {
-        inner: RevmEvm::new_with_inspector(
+        inner: EthEvm::new_with_inspector(
             ctx,
             inspector,
             EthInstructions::default(),
@@ -85,14 +103,11 @@ pub fn new_evm_with_existing_context<'a>(
 }
 
 /// Get the precompiles for the given spec.
-fn get_precompiles(spec: SpecId) -> PrecompilesMap {
-    PrecompilesMap::from_static(
-        EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }
-        .precompiles,
-    )
+fn get_precompiles<DB: Database>(spec: SpecId) -> PrecompilesMap<DB> {
+    PrecompilesMap::new(EthPrecompiles {
+        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
+        spec,
+    })
 }
 
 /// Get the call inputs for the CREATE2 factory.
@@ -118,20 +133,13 @@ fn get_create2_factory_call_inputs(
 
 pub struct FoundryEvm<'db, I: InspectorExt> {
     #[allow(clippy::type_complexity)]
-    inner: RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+    pub inner: EthEvm<
+        &'db mut dyn DatabaseExt,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
-        PrecompilesMap,
-        EthFrame<EthInterpreter>,
+        PrecompilesMap<&'db mut dyn DatabaseExt>,
     >,
 }
 impl<'db, I: InspectorExt> FoundryEvm<'db, I> {
-    /// Consumes the EVM and returns the inner context.
-    pub fn into_context(self) -> EthEvmContext<&'db mut dyn DatabaseExt> {
-        self.inner.ctx
-    }
-
     pub fn run_execution(
         &mut self,
         frame: FrameInput,
@@ -151,66 +159,27 @@ impl<'db, I: InspectorExt> FoundryEvm<'db, I> {
 
         Ok(frame_result)
     }
-}
 
-impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
-    type Precompiles = PrecompilesMap;
-    type Inspector = I;
-    type DB = &'db mut dyn DatabaseExt;
-    type Error = EVMError<DatabaseError>;
-    type HaltReason = HaltReason;
-    type Spec = SpecId;
-    type Tx = TxEnv;
-    type BlockEnv = BlockEnv;
-
-    fn block(&self) -> &BlockEnv {
-        &self.inner.block
-    }
-
-    fn chain_id(&self) -> u64 {
-        self.inner.ctx.cfg.chain_id
-    }
-
-    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-        (&self.inner.ctx.journaled_state.database, &self.inner.inspector, &self.inner.precompiles)
-    }
-
-    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
-        (
-            &mut self.inner.ctx.journaled_state.database,
-            &mut self.inner.inspector,
-            &mut self.inner.precompiles,
-        )
-    }
-
-    fn db_mut(&mut self) -> &mut Self::DB {
-        &mut self.inner.ctx.journaled_state.database
-    }
-
-    fn precompiles(&self) -> &Self::Precompiles {
-        &self.inner.precompiles
-    }
-
-    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
-        &mut self.inner.precompiles
-    }
-
-    fn inspector(&self) -> &Self::Inspector {
+    pub fn inspector(&self) -> &I {
         &self.inner.inspector
     }
 
-    fn inspector_mut(&mut self) -> &mut Self::Inspector {
+    pub fn inspector_mut(&mut self) -> &mut I {
         &mut self.inner.inspector
     }
 
-    fn set_inspector_enabled(&mut self, _enabled: bool) {
-        unimplemented!("FoundryEvm is always inspecting")
+    pub fn precompiles(&self) -> &PrecompilesMap<&'db mut dyn DatabaseExt> {
+        &self.inner.precompiles
     }
 
-    fn transact_raw(
+    pub fn precompiles_mut(&mut self) -> &mut PrecompilesMap<&'db mut dyn DatabaseExt> {
+        &mut self.inner.precompiles
+    }
+
+    pub fn transact(
         &mut self,
-        tx: Self::Tx,
-    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        tx: TxEnv,
+    ) -> Result<ResultAndState<HaltReason>, EVMError<DatabaseError>> {
         self.inner.ctx.tx = tx;
 
         let mut handler = FoundryHandler::<I>::default();
@@ -219,27 +188,14 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
         Ok(ResultAndState::new(result, self.inner.ctx.journaled_state.inner.state.clone()))
     }
 
-    fn transact_system_call(
-        &mut self,
-        _caller: Address,
-        _contract: Address,
-        _data: Bytes,
-    ) -> Result<ExecResultAndState<ExecutionResult>, Self::Error> {
-        unimplemented!()
-    }
-
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
-    where
-        Self: Sized,
-    {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.ctx;
-
-        (journaled_state.database, EvmEnv { block_env, cfg_env })
+    /// Consumes the EVM and returns the inner context.
+    pub fn into_context(self) -> EthEvmContext<&'db mut dyn DatabaseExt> {
+        self.inner.ctx
     }
 }
 
 impl<'db, I: InspectorExt> Deref for FoundryEvm<'db, I> {
-    type Target = Context<BlockEnv, TxEnv, CfgEnv, &'db mut dyn DatabaseExt>;
+    type Target = EthEvmContext<&'db mut dyn DatabaseExt>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner.ctx
@@ -266,12 +222,10 @@ impl<I: InspectorExt> Default for FoundryHandler<'_, I> {
 // Blanket Handler implementation for FoundryHandler, needed for implementing the InspectorHandler
 // trait.
 impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
-    type Evm = RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+    type Evm = EthEvm<
+        &'db mut dyn DatabaseExt,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
-        PrecompilesMap,
-        EthFrame<EthInterpreter>,
+        PrecompilesMap<&'db mut dyn DatabaseExt>,
     >;
     type Error = EVMError<DatabaseError>;
     type HaltReason = HaltReason;

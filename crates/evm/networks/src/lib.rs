@@ -2,7 +2,6 @@
 //!
 //! Foundry EVM network configuration.
 
-use alloy_evm::precompiles::PrecompilesMap;
 use alloy_primitives::{Address, map::AddressHashMap};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -21,7 +20,7 @@ impl NetworkConfigs {
     }
 
     /// Inject precompiles for configured networks.
-    pub fn inject_precompiles(self, _precompiles: &mut PrecompilesMap) {}
+    pub fn inject_precompiles<CTX: revm::context::ContextTr, P: revm::handler::PrecompileProvider<CTX>>(self, _precompiles: &mut alloy_evm::precompiles::PrecompilesMap<CTX, P>) {}
 
     /// Returns precompiles label for configured networks, to be used in traces.
     pub fn precompiles_label(self) -> AddressHashMap<String> {

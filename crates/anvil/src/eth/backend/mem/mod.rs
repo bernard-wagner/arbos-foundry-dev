@@ -47,11 +47,11 @@ use alloy_eips::{
     eip7910::SystemContract,
 };
 use alloy_evm::{
-    Database, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
+    Database, FromRecoveredTx,
     overrides::{OverrideBlockHashes, apply_state_overrides},
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile},
 };
+use foundry_evm::core::evm::{EthEvmContext, PrecompilesMap};
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
@@ -93,10 +93,11 @@ use anvil_rpc::error::RpcError;
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use crate::evm::AnvilEvm;
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::precompiles::EC_RECOVER,
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -183,7 +184,7 @@ impl BlockRequest {
 pub struct Backend {
     /// Access to [`revm::Database`] abstraction.
     ///
-    /// This will be used in combination with [`alloy_evm::Evm`] and is responsible for feeding
+    /// This will be used in combination with the EVM and is responsible for feeding
     /// data to the evm during its execution.
     ///
     /// At time of writing, there are two different types of `Db`:
@@ -191,7 +192,7 @@ pub struct Backend {
     ///   - [`ForkDb`](crate::mem::fork_db::ForkedDatabase): forks off a remote client, missing
     ///     data is retrieved via RPC-calls
     ///
-    /// In order to commit changes to the [`revm::Database`], the [`alloy_evm::Evm`] requires
+    /// In order to commit changes to the [`revm::Database`], the EVM requires
     /// mutable access, which requires a write-lock from this `db`. In forking mode, the time
     /// during which the write-lock is active depends on whether the `ForkDb` can provide all
     /// requested data from memory or whether it has to retrieve it via RPC calls first. This
@@ -1160,7 +1161,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -1463,7 +1464,7 @@ impl Backend {
 
         self.fees.set_blob_excess_gas_and_price(BlobExcessGasAndPrice::new(
             next_block_excess_blob_gas,
-            get_blob_base_fee_update_fraction_by_spec_id(*self.env.read().evm_env.spec_id()),
+            get_blob_base_fee_update_fraction_by_spec_id(self.env.read().evm_env.spec_id()),
         ));
 
         // notify all listeners
