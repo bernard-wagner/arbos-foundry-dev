@@ -41,6 +41,7 @@ use foundry_compilers::{
 };
 use regex::Regex;
 use revm::primitives::hardfork::SpecId;
+use foundry_evm_networks::NetworkConfigs;
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
@@ -128,7 +129,6 @@ pub use compilation::{CompilationRestrictions, SettingsOverrides};
 pub mod extend;
 use extend::Extends;
 
-use foundry_evm_networks::NetworkConfigs;
 pub use semver;
 
 /// Foundry configuration
