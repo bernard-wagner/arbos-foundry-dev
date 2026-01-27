@@ -117,7 +117,7 @@ use arbos_revm::{
 };
 use revm::{
     DatabaseCommit, Inspector, Journal,
-    context::{Block as RevmBlock, Cfg, JournalTr, result::HaltReason},
+    context::{Block as RevmBlock, Cfg, JournalTr, TxEnv as BaseTxEnv, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
@@ -1246,10 +1246,11 @@ impl Backend {
         BlockchainError,
     > {
         let mut env = self.next_env();
-        env.tx = FromRecoveredTx::from_recovered_tx(
+        let base_tx: BaseTxEnv = FromRecoveredTx::from_recovered_tx(
             &tx.pending_transaction.transaction.transaction,
             *tx.pending_transaction.sender(),
         );
+        env.tx = TxEnv::from(base_tx);
 
         let db = self.db.read().await;
         let mut inspector = self.build_inspector();
@@ -1617,7 +1618,7 @@ impl Backend {
         let caller = from.unwrap_or_default();
         let to = to.as_ref().and_then(TxKind::to);
         let blob_hashes = blob_versioned_hashes.unwrap_or_default();
-        let mut base = TxEnv {
+        let mut base = BaseTxEnv {
             caller,
             gas_limit,
             gas_price,
@@ -1644,7 +1645,7 @@ impl Backend {
             ..Default::default()
         };
         base.set_signed_authorization(authorization_list.unwrap_or_default());
-        env.tx = base;
+        env.tx = TxEnv::from(base);
 
         if let Some(nonce) = nonce {
             env.tx.nonce = nonce;
@@ -2784,10 +2785,11 @@ impl Backend {
 
             let target_tx = block.body.transactions[index].clone();
             let target_tx = PendingTransaction::from_maybe_impersonated(target_tx)?;
-            let tx_env: TxEnv = FromRecoveredTx::from_recovered_tx(
+            let base_tx: BaseTxEnv = FromRecoveredTx::from_recovered_tx(
                 &target_tx.transaction.transaction,
                 *target_tx.sender(),
             );
+            let tx_env: TxEnv = TxEnv::from(base_tx);
 
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
 

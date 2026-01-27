@@ -34,6 +34,7 @@ use foundry_evm_core::{
     evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv},
     utils::StateChangeset,
 };
+use revm::context::TxEnv as BaseTxEnv;
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
@@ -757,7 +758,7 @@ impl Executor {
                     ..self.env().evm_env.block_env.clone()
                 },
             },
-            tx: TxEnv {
+            tx: TxEnv::from(BaseTxEnv {
                 caller,
                 kind,
                 data,
@@ -767,8 +768,8 @@ impl Executor {
                 gas_priority_fee: None,
                 gas_limit: self.gas_limit,
                 chain_id: Some(self.env().evm_env.cfg_env.chain_id),
-                ..self.env().tx.clone()
-            },
+                ..self.env().tx.base.clone()
+            }),
         }
     }
 

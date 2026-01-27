@@ -9,7 +9,10 @@ use crate::{
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_evm::Database;
 use alloy_primitives::{Address, Bytes, U256};
-use arbos_revm::{ArbitrumContext, ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
+use arbos_revm::{
+    ArbitrumContext, ArbitrumEvm, precompiles::ArbitrumPrecompileProvider,
+    transaction::ArbitrumTransaction,
+};
 use foundry_fork_db::DatabaseError;
 use revm::{
     Journal,
@@ -31,7 +34,7 @@ use revm::{
 
 pub type BlockEnv = revm::context::BlockEnv;
 pub type CfgEnv<SPEC = SpecId> = arbos_revm::config::ArbitrumConfig<SPEC>;
-pub type TxEnv = revm::context::TxEnv;
+pub type TxEnv = ArbitrumTransaction;
 pub type LocalContext = arbos_revm::local_context::ArbitrumLocalContext;
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;

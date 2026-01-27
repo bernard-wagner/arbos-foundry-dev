@@ -3,6 +3,7 @@ use crate::{
     evm::{BlockEnv, CfgEnv, TxEnv},
     utils::apply_chain_and_block_specific_env_changes,
 };
+use revm::context::TxEnv as BaseTxEnv;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
@@ -83,13 +84,13 @@ pub async fn environment<N: Network, P: Provider<N>>(
                 ..Default::default()
             },
         },
-        tx: TxEnv {
+        tx: TxEnv::from(BaseTxEnv {
             caller: origin,
             gas_price,
             chain_id: Some(chain_id),
             gas_limit: block.header().gas_limit(),
             ..Default::default()
-        },
+        }),
     };
 
     apply_chain_and_block_specific_env_changes::<N>(env.as_env_mut(), &block, configs);

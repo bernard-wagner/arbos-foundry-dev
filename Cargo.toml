@@ -288,7 +288,7 @@ revm-inspectors = { version = "0.33.0", features = ["serde"] }
 alloy-evm = { path = "crates/alloy-evm" }
 
 # arbos
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "7e573294371f66d66d80eaaf12785d4fa13b7df1", default-features = false }
+arbos-revm = { path = "../arbos-revm" }
 arbutil = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
 stylus = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
 wasmer-types = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }

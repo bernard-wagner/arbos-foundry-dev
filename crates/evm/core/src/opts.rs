@@ -5,6 +5,7 @@ use crate::{
     evm::{BlockEnv, TxEnv},
     fork::{CreateFork, configure_env},
 };
+use revm::context::TxEnv as BaseTxEnv;
 use alloy_network::Network;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, network::AnyRpcBlock};
@@ -204,12 +205,12 @@ impl EvmOpts {
                     ..Default::default()
                 },
             },
-            tx: TxEnv {
+            tx: TxEnv::from(BaseTxEnv {
                 gas_price: self.env.gas_price.unwrap_or_default().into(),
                 gas_limit: self.gas_limit(),
                 caller: self.sender,
                 ..Default::default()
-            },
+            }),
         }
     }
 

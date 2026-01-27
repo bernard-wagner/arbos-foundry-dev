@@ -12,6 +12,7 @@ use anvil_rpc::{
     response::ResponseResult,
 };
 use foundry_evm::{backend::DatabaseError, decode::RevertDecoder};
+use arbos_revm::transaction::ArbitrumTransactionError;
 use revm::{
     context_interface::result::{EVMError, InvalidHeader, InvalidTransaction},
     interpreter::InstructionResult,
@@ -134,6 +135,23 @@ where
     T: Into<Self>,
 {
     fn from(err: EVMError<T>) -> Self {
+        match err {
+            EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
+            EVMError::Header(err) => match err {
+                InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
+                InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
+            },
+            EVMError::Database(err) => err.into(),
+            EVMError::Custom(err) => Self::Message(err),
+        }
+    }
+}
+
+impl<T> From<EVMError<T, ArbitrumTransactionError>> for BlockchainError
+where
+    T: Into<Self>,
+{
+    fn from(err: EVMError<T, ArbitrumTransactionError>) -> Self {
         match err {
             EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
             EVMError::Header(err) => match err {
@@ -287,6 +305,17 @@ pub enum InvalidTransactionError {
     /// Forwards error from the revm
     #[error(transparent)]
     Revm(revm::context_interface::result::InvalidTransaction),
+}
+
+impl From<ArbitrumTransactionError> for InvalidTransactionError {
+    fn from(err: ArbitrumTransactionError) -> Self {
+        match err {
+            ArbitrumTransactionError::Base(inner) => Self::from(inner),
+            ArbitrumTransactionError::L1FeeCalculationFailed => {
+                Self::Revm(InvalidTransaction::Str("L1 fee calculation failed".into()))
+            }
+        }
+    }
 }
 
 impl From<InvalidTransaction> for InvalidTransactionError {

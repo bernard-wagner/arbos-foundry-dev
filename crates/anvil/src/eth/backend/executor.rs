@@ -18,6 +18,7 @@ use alloy_consensus::{
     proofs::calculate_receipt_root, transaction::Either,
 };
 use alloy_eips::{
+    eip2718::Encodable2718,
     eip7685::EMPTY_REQUESTS_HASH,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     eip7840::BlobParams,
@@ -31,7 +32,7 @@ use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
-use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
+use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider, transaction::ArbitrumTransaction};
 use foundry_evm::{
     backend::DatabaseError,
     core::{
@@ -266,7 +267,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
     }
 
     fn env_for(&self, tx: &PendingTransaction) -> Env {
-        let mut tx_env: TxEnv =
+        let mut base_tx_env: TxEnv =
             FromRecoveredTx::from_recovered_tx(&tx.transaction.transaction, *tx.sender());
 
         if let TypedTransaction::EIP7702(tx_7702) = &tx.transaction.transaction
@@ -277,7 +278,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
                 .tx()
                 .authorization_list
                 .iter()
-                .zip(tx_env.authorization_list)
+                .zip(base_tx_env.authorization_list)
                 .map(|(signed_auth, either_auth)| {
                     either_auth.right_and_then(|recovered_auth| {
                         if recovered_auth.authority().is_none()
@@ -295,8 +296,12 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
                     })
                 })
                 .collect();
-            tx_env.authorization_list = cheated_auths;
+            base_tx_env.authorization_list = cheated_auths;
         }
+
+        // Encode the transaction for L1 fee calculation and create ArbitrumTransaction
+        let enveloped_tx = tx.transaction.transaction.encoded_2718();
+        let tx_env = ArbitrumTransaction::new_with_enveloped(base_tx_env, enveloped_tx.into());
 
         Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
     }

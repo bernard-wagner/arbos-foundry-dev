@@ -15,7 +15,6 @@ pub struct Env {
     pub networks: NetworkConfigs,
 }
 
-/// Helper container type for [`EvmEnv`] and [`TxEnv`].
 impl Env {
     pub fn new(cfg: CfgEnv, block: BlockEnv, tx: TxEnv, networks: NetworkConfigs) -> Self {
         Self { evm_env: EvmEnv { cfg_env: cfg, block_env: block }, tx, networks }

@@ -48,7 +48,7 @@ use foundry_evm::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
-use revm::{context_interface::block::BlobExcessGasAndPrice, primitives::hardfork::SpecId};
+use revm::{context::TxEnv as BaseTxEnv, context_interface::block::BlobExcessGasAndPrice, primitives::hardfork::SpecId};
 use serde_json::{Value, json};
 use std::{
     fmt::Write as FmtWrite,
@@ -1085,7 +1085,7 @@ impl NodeConfig {
                 basefee: self.get_base_fee(),
                 ..Default::default()
             },
-            TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
+            TxEnv::from(BaseTxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() }),
             self.networks,
         );
 

@@ -1,9 +1,9 @@
 use alloy_evm::precompiles::DynPrecompile;
 use alloy_primitives::Address;
-use foundry_evm::core::evm::{EthEvm, EthEvmContext};
+use arbos_revm::transaction::ArbitrumTransactionError;
+use foundry_evm::core::evm::{EthEvm, EthEvmContext, TxEnv};
 use revm::{
     Database, DatabaseCommit, Inspector,
-    context::TxEnv,
     context_interface::result::{EVMError, ExecutionResult, ResultAndState},
     handler::PrecompileProvider,
     interpreter::{InterpreterResult, interpreter::EthInterpreter},
@@ -36,12 +36,12 @@ where
     I: Inspector<EthEvmContext<DB>, EthInterpreter>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
 {
-    pub fn transact(&mut self, tx: TxEnv) -> Result<ResultAndState, EVMError<DB::Error>> {
+    pub fn transact(&mut self, tx: TxEnv) -> Result<ResultAndState, EVMError<DB::Error, ArbitrumTransactionError>> {
         use revm::InspectEvm;
         self.0.inspect_tx(tx)
     }
 
-    pub fn transact_commit(&mut self, tx: TxEnv) -> Result<ExecutionResult, EVMError<DB::Error>>
+    pub fn transact_commit(&mut self, tx: TxEnv) -> Result<ExecutionResult, EVMError<DB::Error, ArbitrumTransactionError>>
     where
         DB: DatabaseCommit,
     {
@@ -60,9 +60,10 @@ mod tests {
     use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
     use foundry_evm::core::evm::{EthEvmContext, LocalContext, PrecompilesMap};
     use itertools::Itertools;
+    use foundry_evm::core::evm::TxEnv;
     use revm::{
         Journal,
-        context::{JournalTr, TxEnv},
+        context::{JournalTr, TxEnv as BaseTxEnv},
         database::EmptyDBTyped,
         handler::{PrecompileProvider, instructions::EthInstructions},
         inspector::NoOpInspector,
@@ -113,11 +114,11 @@ mod tests {
                 block_env: Default::default(),
                 cfg_env: TestCfgEnv::new_with_spec(spec),
             },
-            tx: TxEnv {
+            tx: TxEnv::from(BaseTxEnv {
                 kind: TxKind::Call(PRECOMPILE_ADDR),
                 data: PAYLOAD.into(),
                 ..Default::default()
-            },
+            }),
         };
 
         let eth_evm_context = EthEvmContext {
