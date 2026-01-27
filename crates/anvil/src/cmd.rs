@@ -10,7 +10,7 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use core::fmt;
 use foundry_common::shell;
-use foundry_config::{Chain, Config, FigmentProviders};
+use foundry_config::{Chain, Config, FigmentProviders, stylus::StylusConfig};
 use foundry_evm_networks::NetworkConfigs;
 use futures::FutureExt;
 use rand_08::{SeedableRng, rngs::StdRng};
@@ -276,7 +276,12 @@ impl NodeArgs {
             .with_disable_pool_balance_checks(self.evm.disable_pool_balance_checks)
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
-            .with_cache_path(self.cache_path))
+            .with_cache_path(self.cache_path)
+            .with_stylus_config(if self.evm.stylus.is_default() {
+                None
+            } else {
+                Some(self.evm.stylus.clone())
+            }))
     }
 
     fn account_generator(&self) -> AccountGenerator {
@@ -599,6 +604,10 @@ pub struct AnvilEvmArgs {
 
     #[command(flatten)]
     pub networks: NetworkConfigs,
+
+    /// Stylus configuration options.
+    #[command(flatten)]
+    pub stylus: StylusConfig,
 }
 
 /// Resolves an alias passed as fork-url to the matching url defined in the rpc_endpoints section

@@ -19,6 +19,11 @@ use alloy_primitives::{
     map::{AddressHashMap, HashMap},
 };
 use alloy_sol_types::{SolCall, sol};
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use foundry_evm_core::{
     backend::{Backend, BackendError, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
@@ -26,13 +31,15 @@ use foundry_evm_core::{
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
     },
     decode::{RevertDecoder, SkipReason},
-    evm::{BlockEnv, EvmEnv, TxEnv},
+    evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv},
     utils::StateChangeset,
 };
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
+    Journal,
     bytecode::Bytecode,
+    context::JournalTr,
     context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,
@@ -320,6 +327,43 @@ impl Executor {
     #[inline]
     pub fn create2_deployer(&self) -> Address {
         self.inspector().create2_deployer
+    }
+
+    #[inline]
+    pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let changes = {
+            let is_fork = self.backend.is_in_forking_mode();
+
+            let mut context = ArbitrumContext {
+                block: BlockEnv::default(),
+                tx: TxEnv::default(),
+                cfg: CfgEnv::default(),
+                journaled_state: { Journal::new(self.backend.db_mut()) },
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            let mut params: ArbosStateParams =
+                if is_fork { state.get().unwrap() } else { ArbosStateParams::default() };
+
+            f(&mut params);
+
+            state.initialize(&params).unwrap();
+            context.journaled_state.finalize()
+        };
+
+        let changes = changes
+            .into_iter()
+            .map(|(address, account)| {
+                let account = account.with_touched_mark();
+                (address, account)
+            })
+            .collect();
+
+        self.backend.commit(changes);
     }
 
     /// Deploys a contract and commits the new state to the underlying database.

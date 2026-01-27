@@ -97,7 +97,7 @@ use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     core::{
-        evm::{BlockEnv, EthEvmContext, PrecompilesMap, TxEnv},
+        evm::{BlockEnv, CfgEnv, EthEvmContext, PrecompilesMap, TxEnv},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -110,9 +110,14 @@ use foundry_evm::{
 };
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use revm::{
-    DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, Cfg, result::HaltReason},
+    DatabaseCommit, Inspector, Journal,
+    context::{Block as RevmBlock, Cfg, JournalTr, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
@@ -448,6 +453,48 @@ impl Backend {
         trace!(target: "backend", "set genesis balances");
 
         Ok(())
+    }
+
+    /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
+    ///
+    /// This creates a temporary journal context, loads or defaults `ArbosStateParams`,
+    /// applies the closure to modify them, initializes the ArbOS state, and commits
+    /// the resulting state changes to the database.
+    pub async fn apply_arbitrum_state_overrides(&self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let is_fork = self.fork.read().is_some();
+        let mut db = self.db.write().await;
+
+        let changes = {
+            let mut context = ArbitrumContext {
+                block: BlockEnv::default(),
+                tx: TxEnv::default(),
+                cfg: CfgEnv::default(),
+                journaled_state: Journal::new(&mut **db),
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            let mut params: ArbosStateParams =
+                if is_fork { state.get().unwrap() } else { ArbosStateParams::default() };
+
+            f(&mut params);
+
+            state.initialize(&params).unwrap();
+            context.journaled_state.finalize()
+        };
+
+        let changes = changes
+            .into_iter()
+            .map(|(address, account)| {
+                let account = account.with_touched_mark();
+                (address, account)
+            })
+            .collect();
+
+        db.commit(changes);
     }
 
     /// Sets the account to impersonate

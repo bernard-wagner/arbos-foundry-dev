@@ -5091,6 +5091,7 @@ version = "1.5.1"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
+ "arbos-revm",
  "clap 4.5.51",
  "dirs",
  "dunce",
@@ -5154,6 +5155,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-sol-types",
+ "arbos-revm",
  "eyre",
  "foundry-cheatcodes",
  "foundry-common",

@@ -35,7 +35,7 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
     provider::{ProviderBuilder, RetryProvider},
 };
-use foundry_config::Config;
+use foundry_config::{Config, apply_stylus_config, stylus::StylusConfig};
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
@@ -202,6 +202,8 @@ pub struct NodeConfig {
     pub silent: bool,
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
+    /// Stylus configuration
+    pub stylus_config: Option<StylusConfig>,
 }
 
 impl NodeConfig {
@@ -495,6 +497,7 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
+            stylus_config: None,
         }
     }
 }
@@ -1042,6 +1045,12 @@ impl NodeConfig {
         self
     }
 
+    #[must_use]
+    pub fn with_stylus_config(mut self, stylus_config: Option<StylusConfig>) -> Self {
+        self.stylus_config = stylus_config;
+        self
+    }
+
     /// Configures everything related to env, backend and database and returns the
     /// [Backend](mem::Backend)
     ///
@@ -1149,6 +1158,16 @@ impl NodeConfig {
             Arc::new(TokioRwLock::new(self.clone())),
         )
         .await?;
+
+        // Apply Arbitrum state overrides if stylus config is provided.
+        if let Some(ref stylus_config) = self.stylus_config {
+            let stylus_config = stylus_config.clone();
+            backend
+                .apply_arbitrum_state_overrides(|params| {
+                    apply_stylus_config(params, &stylus_config);
+                })
+                .await;
+        }
 
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.

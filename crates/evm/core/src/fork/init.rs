@@ -8,6 +8,7 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
+use foundry_config::stylus::StylusConfig;
 use foundry_evm_networks::NetworkConfigs;
 
 /// Initializes a REVM block environment based on a forked
@@ -23,6 +24,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
     configs: NetworkConfigs,
+    stylus: Option<StylusConfig>,
 ) -> eyre::Result<(Env, N::BlockResponse)> {
     trace!(
         %memory_limit,
@@ -65,7 +67,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
         eyre::bail!("failed to get {bn_msg}{latest_msg}");
     };
 
-    let cfg = configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit);
+    let cfg = configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit, stylus);
 
     let mut env = Env {
         evm_env: EvmEnv {
@@ -108,7 +110,10 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus: Option<StylusConfig>,
 ) -> CfgEnv {
+    let stylus = stylus.unwrap_or_default();
+
     let mut cfg = CfgEnv::default();
     cfg.chain_id = chain_id;
     cfg.memory_limit = memory_limit;
@@ -125,5 +130,14 @@ pub fn configure_env(
     if !enable_tx_gas_limit {
         cfg.tx_gas_limit_cap = Some(u64::MAX);
     }
+
+    // Apply Stylus configuration options
+    if let Some(arbos_version) = stylus.arbos_version {
+        cfg.arbos_version = arbos_version;
+    }
+    cfg.debug_mode = stylus.debug_mode_stylus;
+    cfg.disable_auto_cache = stylus.disable_auto_cache_stylus;
+    cfg.disable_auto_activate = stylus.disable_auto_activate_stylus;
+
     cfg
 }
