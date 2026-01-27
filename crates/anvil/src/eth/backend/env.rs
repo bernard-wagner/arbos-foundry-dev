@@ -1,6 +1,11 @@
-use foundry_evm::{EnvMut, EvmEnv, core::AsEnvMut};
+use foundry_evm::{
+    EnvMut, EvmEnv,
+    core::{
+        AsEnvMut,
+        evm::{BlockEnv, CfgEnv, TxEnv},
+    },
+};
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]

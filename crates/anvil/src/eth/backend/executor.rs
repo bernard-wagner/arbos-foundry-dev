@@ -10,6 +10,7 @@ use crate::{
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
     },
+    evm::AnvilEvm,
     mem::inspector::AnvilInspector,
 };
 use alloy_consensus::{
@@ -25,29 +26,28 @@ use alloy_evm::{
     FromRecoveredTx,
     precompiles::{DynPrecompile, Precompile},
 };
-use foundry_evm::core::evm::{EthEvmContext, PrecompilesMap};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
-use crate::evm::AnvilEvm;
+use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
 use foundry_evm::{
     backend::DatabaseError,
-    core::precompiles::EC_RECOVER,
+    core::{
+        evm::{BlockEnv, CfgEnv, EthEvmContext, LocalContext, PrecompilesMap},
+        precompiles::EC_RECOVER,
+    },
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
     Database, DatabaseRef, Inspector, Journal,
-    context::{
-        Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv,
-    },
+    context::{Block as RevmBlock, Cfg, JournalTr, TxEnv},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -505,14 +505,11 @@ where
         error: Ok(()),
     };
 
-    AnvilEvm(RevmEvm::new_with_inspector(
+    AnvilEvm(ArbitrumEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
-        PrecompilesMap::new(EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }),
+        PrecompilesMap::new(ArbitrumPrecompileProvider::new(spec)),
     ))
 }
 

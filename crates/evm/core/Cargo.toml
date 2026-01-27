@@ -39,6 +39,7 @@ alloy-rpc-types.workspace = true
 alloy-sol-types.workspace = true
 foundry-fork-db.workspace = true
 
+arbos-revm.workspace = true
 revm = { workspace = true, features = [
     "std",
     "serde",
@@ -46,6 +47,7 @@ revm = { workspace = true, features = [
     "optional_eip3607",
     "optional_block_gas_limit",
     "optional_no_base_fee",
+    "optional_eip3541",
     "arbitrary",
     "c-kzg",
     "blst",

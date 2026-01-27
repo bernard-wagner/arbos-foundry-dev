@@ -59,10 +59,12 @@ alloy-trie.workspace = true
 alloy-hardforks.workspace = true
 
 # revm
+arbos-revm.workspace = true
 revm = { workspace = true, features = [
     "std",
     "serde",
     "memory_limit",
+    "optional_eip3541",
     "c-kzg",
 ] }
 revm-inspectors.workspace = true

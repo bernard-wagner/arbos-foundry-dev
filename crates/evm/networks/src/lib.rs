@@ -20,7 +20,14 @@ impl NetworkConfigs {
     }
 
     /// Inject precompiles for configured networks.
-    pub fn inject_precompiles<CTX: revm::context::ContextTr, P: revm::handler::PrecompileProvider<CTX>>(self, _precompiles: &mut alloy_evm::precompiles::PrecompilesMap<CTX, P>) {}
+    pub fn inject_precompiles<
+        CTX: revm::context::ContextTr,
+        P: revm::handler::PrecompileProvider<CTX>,
+    >(
+        self,
+        _precompiles: &mut alloy_evm::precompiles::PrecompilesMap<CTX, P>,
+    ) {
+    }
 
     /// Returns precompiles label for configured networks, to be used in traces.
     pub fn precompiles_label(self) -> AddressHashMap<String> {

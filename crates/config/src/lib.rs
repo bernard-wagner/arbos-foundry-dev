@@ -39,9 +39,9 @@ use foundry_compilers::{
     multi::{MultiCompilerParser, MultiCompilerRestrictions},
     solc::{CliSettings, SolcLanguage, SolcSettings},
 };
+use foundry_evm_networks::NetworkConfigs;
 use regex::Regex;
 use revm::primitives::hardfork::SpecId;
-use foundry_evm_networks::NetworkConfigs;
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{

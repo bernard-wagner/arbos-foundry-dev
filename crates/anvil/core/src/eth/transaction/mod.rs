@@ -1187,7 +1187,6 @@ impl FromRecoveredTx<TypedTransaction> for TxEnv {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1440,6 +1439,5 @@ mod tests {
         assert_eq!(tx_env.caller, sender);
         assert_eq!(tx_env.gas_limit, 0x5208);
         assert_eq!(tx_env.gas_price, 1);
-
     }
 }

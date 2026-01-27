@@ -1,11 +1,14 @@
-use crate::{AsEnvMut, Env, EvmEnv, utils::apply_chain_and_block_specific_env_changes};
+use crate::{
+    AsEnvMut, Env, EvmEnv,
+    evm::{BlockEnv, CfgEnv, TxEnv},
+    utils::apply_chain_and_block_specific_env_changes,
+};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.
@@ -114,6 +117,7 @@ pub fn configure_env(
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
     cfg.disable_eip3607 = true;
+    cfg.disable_eip3541 = true;
     cfg.disable_block_gas_limit = disable_block_gas_limit;
     cfg.disable_nonce_check = true;
     // By default do not enforce transaction gas limits imposed by Osaka (EIP-7825).

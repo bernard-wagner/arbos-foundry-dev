@@ -5,13 +5,13 @@
 //! of these traits is to enable flexible transaction input while maintaining type safety.
 
 use alloy_consensus::{
-    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930,
-    TxEip4844, TxEip7702, TxLegacy,
+    EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+    crypto::secp256k1, transaction::Recovered,
 };
 use alloy_eips::{
+    Typed2718,
     eip2718::WithEncoded,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
-    Typed2718,
 };
 use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};

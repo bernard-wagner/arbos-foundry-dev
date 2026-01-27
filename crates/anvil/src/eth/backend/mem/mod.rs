@@ -27,6 +27,7 @@ use crate::{
         pool::transactions::PoolTransaction,
         sign::build_typed_transaction,
     },
+    evm::AnvilEvm,
     mem::{
         inspector::AnvilInspector,
         storage::{BlockchainStorage, InMemoryBlockStates, MinedBlockOutcome},
@@ -51,7 +52,6 @@ use alloy_evm::{
     overrides::{OverrideBlockHashes, apply_state_overrides},
     precompiles::{DynPrecompile, Precompile},
 };
-use foundry_evm::core::evm::{EthEvmContext, PrecompilesMap};
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
@@ -93,11 +93,13 @@ use anvil_rpc::error::RpcError;
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
-use crate::evm::AnvilEvm;
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::precompiles::EC_RECOVER,
+    core::{
+        evm::{BlockEnv, EthEvmContext, PrecompilesMap, TxEnv},
+        precompiles::EC_RECOVER,
+    },
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -110,7 +112,7 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
     DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv, result::HaltReason},
+    context::{Block as RevmBlock, Cfg, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},

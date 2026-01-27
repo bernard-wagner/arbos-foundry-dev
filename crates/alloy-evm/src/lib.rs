@@ -5,8 +5,8 @@ use revm::context::{Block, Cfg};
 #[cfg(feature = "overrides")]
 pub mod overrides;
 pub mod precompiles;
-pub mod tx;
 mod traits;
+pub mod tx;
 pub use traits::EvmInternals;
 pub use tx::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, RecoveredTx, ToTxEnv};
 

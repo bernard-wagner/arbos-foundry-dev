@@ -22,11 +22,11 @@ pub struct AnvilEvm<DB: Database, I, P>(pub EthEvm<DB, I, P>);
 
 impl<DB: Database, I, P> AnvilEvm<DB, I, P> {
     pub fn precompiles(&self) -> &P {
-        &self.0.precompiles
+        &self.0.0.precompiles
     }
 
     pub fn precompiles_mut(&mut self) -> &mut P {
-        &mut self.0.precompiles
+        &mut self.0.0.precompiles
     }
 }
 
@@ -57,16 +57,17 @@ mod tests {
     use crate::PrecompileFactory;
     use alloy_evm::precompiles::{DynPrecompile, PrecompileInput};
     use alloy_primitives::{Address, Bytes, TxKind, address};
-    use foundry_evm::core::evm::{EthEvmContext, PrecompilesMap};
+    use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
+    use foundry_evm::core::evm::{EthEvmContext, LocalContext, PrecompilesMap};
     use itertools::Itertools;
     use revm::{
         Journal,
-        context::{CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv},
+        context::{JournalTr, TxEnv},
         database::EmptyDBTyped,
-        handler::{EthPrecompiles, PrecompileProvider, instructions::EthInstructions},
+        handler::{PrecompileProvider, instructions::EthInstructions},
         inspector::NoOpInspector,
         interpreter::interpreter::EthInterpreter,
-        precompile::{PrecompileOutput, PrecompileSpecId, Precompiles},
+        precompile::PrecompileOutput,
         primitives::hardfork::SpecId,
     };
 
@@ -76,7 +77,7 @@ mod tests {
     const ETH_PRAGUE_PRECOMPILE: Address = address!("0x0000000000000000000000000000000000000011");
 
     // A custom precompile address and payload for testing.
-    const PRECOMPILE_ADDR: Address = address!("0x0000000000000000000000000000000000000071");
+    const PRECOMPILE_ADDR: Address = address!("0x00000000000000000000000000000000000f0071");
     const PAYLOAD: &[u8] = &[0xde, 0xad, 0xbe, 0xef];
 
     #[derive(Debug)]
@@ -98,6 +99,8 @@ mod tests {
         }
     }
 
+    type TestCfgEnv = foundry_evm::core::evm::CfgEnv;
+
     /// Creates a new EVM instance with the custom precompile factory.
     fn create_eth_evm(
         spec: SpecId,
@@ -108,7 +111,7 @@ mod tests {
         let eth_env = foundry_evm::Env {
             evm_env: foundry_evm::EvmEnv {
                 block_env: Default::default(),
-                cfg_env: CfgEnv::new_with_spec(spec),
+                cfg_env: TestCfgEnv::new_with_spec(spec),
             },
             tx: TxEnv {
                 kind: TxKind::Call(PRECOMPILE_ADDR),
@@ -127,14 +130,11 @@ mod tests {
             error: Ok(()),
         };
 
-        let eth_evm = AnvilEvm(RevmEvm::new_with_inspector(
+        let eth_evm = AnvilEvm(ArbitrumEvm::new_with_inspector(
             eth_evm_context,
             NoOpInspector,
             EthInstructions::<EthInterpreter, EthEvmContext<revm::database::EmptyDB>>::default(),
-            PrecompilesMap::new(EthPrecompiles {
-                precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-                spec,
-            }),
+            PrecompilesMap::new(ArbitrumPrecompileProvider::new(spec)),
         ));
 
         (eth_env, eth_evm)

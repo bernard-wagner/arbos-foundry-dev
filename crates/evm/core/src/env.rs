@@ -4,8 +4,8 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
-use crate::evm::{BlockEnv, CfgEnv, TxEnv};
 pub use crate::evm::EvmEnv;
+use crate::evm::{BlockEnv, CfgEnv, TxEnv};
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]
