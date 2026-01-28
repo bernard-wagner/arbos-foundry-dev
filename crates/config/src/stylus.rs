@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -98,6 +99,11 @@ pub struct StylusConfig {
     #[arg(long = "stylus-debug")]
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub debug_mode_stylus: bool,
+
+    /// Address of the Stylus deployer contract used by the deployStylusCode cheatcode.
+    #[arg(long = "stylus-deployer-address", value_name = "STYLUS_DEPLOYER_ADDRESS")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployer_address: Option<Address>,
 }
 
 impl StylusConfig {

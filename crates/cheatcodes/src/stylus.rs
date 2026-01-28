@@ -1,15 +1,23 @@
 use std::{fs, path::PathBuf};
 
-use alloy_primitives::{Bytes, U256, hex};
+use alloy_primitives::{Address, Bytes, U256, address, hex};
 use alloy_sol_types::SolValue;
+use arbos_revm::{
+    state::program::activate_program,
+    stylus_executor::stylus_code,
+};
 use foundry_config::fs_permissions::FsAccessKind;
 use revm::{
-    context::CreateScheme,
+    context::{ContextTr, CreateScheme, JournalTr},
     interpreter::{CallInputs, CallScheme, CreateInputs},
 };
 use spec::Vm::*;
 
 use crate::{Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Result};
+
+/// Default address of the StylusDeployer contract.
+const DEFAULT_STYLUS_DEPLOYER_ADDRESS: Address =
+    address!("0xcEcba2F1DC234f70Dd89F2041029807F8D03A990");
 
 impl Cheatcode for deployStylusCode_0Call {
     fn apply_full(&self, ccx: &mut CheatsCtxt, executor: &mut dyn CheatcodesExecutor) -> Result {
@@ -89,7 +97,8 @@ impl Cheatcode for brotliDecompressCall {
 }
 
 /// Helper function to deploy stylus contract from artifact code.
-/// Uses CREATE2 scheme if salt specified.
+/// Matches StylusDeployer.sol behavior: deploys, activates via ARB_WASM precompile, then
+/// initializes. Uses CREATE2 scheme if salt specified.
 fn deploy_stylus_code(
     ccx: &mut CheatsCtxt,
     executor: &mut dyn CheatcodesExecutor,
@@ -98,25 +107,35 @@ fn deploy_stylus_code(
     value: Option<U256>,
     salt: Option<U256>,
 ) -> Result {
-    let bytecode = get_stylus_init_code(ccx.state, path)?.to_vec();
+    let compressed_bytecode = get_stylus_bytecode(ccx.state, path)?;
+    let init_code = get_init_code_of_empty_constructor(compressed_bytecode.to_vec());
 
     let scheme =
         if let Some(salt) = salt { CreateScheme::Create2 { salt } } else { CreateScheme::Create };
 
+    // StylusDeployer.sol always deploys with 0 value; value is used for initialization only
     let create_value = if constructor_args.is_some() {
-        // if constructor args are provided, we need to deploy the contract with value
         U256::ZERO
     } else {
-        // if no constructor args, we can deploy without value
         value.unwrap_or(U256::ZERO)
     };
 
+    // Use the configured deployer address as the CREATE caller (matching StylusDeployer.sol)
+    let deployer_address = ccx
+        .state
+        .config
+        .evm_opts
+        .stylus_config
+        .as_ref()
+        .and_then(|c| c.deployer_address)
+        .unwrap_or(DEFAULT_STYLUS_DEPLOYER_ADDRESS);
+
     let outcome = executor.exec_create(
         CreateInputs {
-            caller: ccx.caller,
+            caller: deployer_address,
             scheme,
             value: create_value,
-            init_code: bytecode.into(),
+            init_code: init_code.into(),
             gas_limit: ccx.gas_limit,
         },
         ccx,
@@ -127,6 +146,9 @@ fn deploy_stylus_code(
     }
 
     let address = outcome.address.ok_or_else(|| fmt_err!("contract creation failed"))?;
+
+    // Activate the program
+    activate_stylus_program(ccx, address)?;
 
     if let Some(constructor_args) = constructor_args {
         // cast sig 'stylus_constructor()' => 0x5585258d
@@ -157,12 +179,30 @@ fn deploy_stylus_code(
     Ok(address.abi_encode())
 }
 
-/// Returns the Stylus bytecode from a WASM artifact file, wrapped in init code for CREATE/CREATE2
-/// deployment. This is used by `deployStylusCode` to deploy contracts directly.
-fn get_stylus_init_code(state: &Cheatcodes, path: &str) -> Result<Bytes> {
-    let bytecode = get_stylus_bytecode(state, path)?;
-    let init_code = get_init_code_of_empty_constructor(bytecode.to_vec());
-    Ok(Bytes::from(init_code))
+/// Activates a Stylus program by compiling and storing it directly.
+fn activate_stylus_program(
+    ccx: &mut CheatsCtxt,
+    program_address: Address,
+) -> Result<()> {
+    let code_hash = ccx.ecx.journal_mut().code_hash(program_address)
+        .map_err(|e| fmt_err!("failed to get code hash: {:?}", e))?
+        .data;
+
+    let bytecode = ccx.ecx.journal_mut().code(program_address)
+        .ok()
+        .unwrap_or_default()
+        .data;
+
+    let wasm_bytecode = match stylus_code(&bytecode) {
+        Ok(Some(code)) => code,
+        Ok(None) => return Err(fmt_err!("program is not a Stylus WASM contract")),
+        Err(err) => return Err(fmt_err!("failed to decode Stylus bytecode: {}", String::from_utf8_lossy(&err))),
+    };
+
+    activate_program(ccx.ecx, code_hash, &wasm_bytecode, true)
+        .map_err(|e| fmt_err!("failed to activate program: {e}"))?;
+
+    Ok(())
 }
 
 /// Returns the compressed and prefixed Stylus bytecode from a WASM artifact file.
@@ -172,7 +212,7 @@ fn get_stylus_init_code(state: &Cheatcodes, path: &str) -> Result<Bytes> {
 /// - `path/to/artifact.wasm.br` - pre-compressed WASM
 ///
 /// This function returns raw bytecode suitable for use with external deployment contracts like
-/// StylusDeployer. For direct deployment via CREATE/CREATE2, use `get_stylus_init_code` instead.
+/// StylusDeployer, or for wrapping in init code for direct CREATE/CREATE2 deployment.
 fn get_stylus_bytecode(state: &Cheatcodes, path: &str) -> Result<Bytes> {
     let path = if path.ends_with(".wasm") || path.ends_with(".wasm.br") {
         PathBuf::from(path)
