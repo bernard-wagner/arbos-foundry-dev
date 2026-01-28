@@ -70,10 +70,10 @@ const GENERIC_BIN_ENV_KEYS = [
 ]
 
 const TOOL_ENV_KEYS = /** @type {Record<Tool, readonly string[]>} */ ({
-  forge: ['forge_bin_path', 'FORGE_BIN_PATH'],
-  cast: ['cast_bin_path', 'CAST_BIN_PATH'],
-  anvil: ['anvil_bin_path', 'ANVIL_BIN_PATH'],
-  chisel: ['chisel_bin_path', 'CHISEL_BIN_PATH']
+  'arbos-forge': ['arbos-forge_bin_path', 'ARBOS_FORGE_BIN_PATH'],
+  'arbos-cast': ['arbos-cast_bin_path', 'ARBOS_CAST_BIN_PATH'],
+  'arbos-anvil': ['arbos-anvil_bin_path', 'ARBOS_ANVIL_BIN_PATH'],
+  'arbos-chisel': ['arbos-chisel_bin_path', 'ARBOS_CHISEL_BIN_PATH']
 })
 
 main().catch(error => {

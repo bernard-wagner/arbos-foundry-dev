@@ -19,19 +19,19 @@ import { colors } from '#const.mjs'
  */
 
 const TOOL_META = /** @type {const} */ (/** @type {Record<Tool, { homepage: string; description: string }>} */ ({
-  forge: {
+  'arbos-forge': {
     homepage: 'https://getfoundry.sh/forge',
     description: 'Fast and flexible Ethereum testing framework'
   },
-  cast: {
+  'arbos-cast': {
     homepage: 'https://getfoundry.sh/cast',
     description: 'Swiss Army knife for interacting with Ethereum applications from the command line'
   },
-  anvil: {
+  'arbos-anvil': {
     homepage: 'https://getfoundry.sh/anvil',
     description: 'Anvil is a fast local Ethereum development node'
   },
-  chisel: {
+  'arbos-chisel': {
     homepage: 'https://getfoundry.sh/chisel',
     description: 'Chisel is a fast, utilitarian, and verbose Solidity REPL'
   }

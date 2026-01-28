@@ -556,7 +556,7 @@ pub struct Config {
     pub script_execution_protection: bool,
 
     /// Configuration for Stylus programs.
-    #[serde(default, skip_serializing_if = "StylusConfig::is_default")]
+    #[serde(default)]
     pub stylus: StylusConfig,
 
     /// PRIVATE: This structure may grow, As such, constructing this structure should

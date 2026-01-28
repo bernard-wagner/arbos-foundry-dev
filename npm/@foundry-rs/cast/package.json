@@ -5,21 +5,21 @@
   "homepage": "https://getfoundry.sh/cast",
   "description": "Swiss Army knife for interacting with Ethereum applications from the command line",
   "bin": {
-    "cast": "./bin.mjs"
+    "arbos-cast": "./bin.mjs"
   },
   "files": [
     "bin",
     "dist"
   ],
   "scripts": {
-    "postinstall": "TARGET_TOOL=cast node ./dist/postinstall.mjs"
+    "postinstall": "TARGET_TOOL=arbos-cast node ./dist/postinstall.mjs"
   },
   "optionalDependencies": {
-    "@foundry-rs/cast-darwin-arm64": "0.0.0",
-    "@foundry-rs/cast-darwin-amd64": "0.0.0",
-    "@foundry-rs/cast-linux-arm64": "0.0.0",
-    "@foundry-rs/cast-linux-amd64": "0.0.0",
-    "@foundry-rs/cast-win32-amd64": "0.0.0"
+    "@foundry-rs/arbos-cast-darwin-arm64": "0.0.0",
+    "@foundry-rs/arbos-cast-darwin-amd64": "0.0.0",
+    "@foundry-rs/arbos-cast-linux-arm64": "0.0.0",
+    "@foundry-rs/arbos-cast-linux-amd64": "0.0.0",
+    "@foundry-rs/arbos-cast-win32-amd64": "0.0.0"
   },
   "publishConfig": {
     "access": "public",

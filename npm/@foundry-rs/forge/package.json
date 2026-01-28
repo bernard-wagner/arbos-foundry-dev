@@ -5,21 +5,21 @@
   "homepage": "https://getfoundry.sh/forge",
   "description": "Fast and flexible Ethereum testing framework",
   "bin": {
-    "forge": "./bin.mjs"
+    "arbos-forge": "./bin.mjs"
   },
   "files": [
     "bin",
     "dist"
   ],
   "scripts": {
-    "postinstall": "TARGET_TOOL=forge node ./dist/postinstall.mjs"
+    "postinstall": "TARGET_TOOL=arbos-forge node ./dist/postinstall.mjs"
   },
   "optionalDependencies": {
-    "@foundry-rs/forge-darwin-arm64": "0.0.0",
-    "@foundry-rs/forge-darwin-amd64": "0.0.0",
-    "@foundry-rs/forge-linux-arm64": "0.0.0",
-    "@foundry-rs/forge-linux-amd64": "0.0.0",
-    "@foundry-rs/forge-win32-amd64": "0.0.0"
+    "@foundry-rs/arbos-forge-darwin-arm64": "0.0.0",
+    "@foundry-rs/arbos-forge-darwin-amd64": "0.0.0",
+    "@foundry-rs/arbos-forge-linux-arm64": "0.0.0",
+    "@foundry-rs/arbos-forge-linux-amd64": "0.0.0",
+    "@foundry-rs/arbos-forge-win32-amd64": "0.0.0"
   },
   "publishConfig": {
     "access": "public",
