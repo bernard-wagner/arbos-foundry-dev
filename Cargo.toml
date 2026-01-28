@@ -292,6 +292,10 @@ arbos-revm = { path = "../arbos-revm" }
 arbutil = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
 stylus = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
 wasmer-types = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
+wasmer = {  git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "43057faaa01a180cd3e2fab221da210dfe4ac905", default-features = false }
+wasm-encoder = "0.244.0"
+wasmparser = "0.244.0"
+wasmprinter = "0.244.0"
 
 ## cli
 anstream = "0.6"

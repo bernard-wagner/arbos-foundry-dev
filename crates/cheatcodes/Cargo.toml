@@ -70,3 +70,7 @@ serde.workspace = true
 
 arbos-revm.workspace = true
 stylus = { workspace = true, features = ["cc_brotli"] }
+wasm-encoder.workspace = true
+wasmparser.workspace = true
+wasmprinter.workspace = true
+wasmer.workspace = true
