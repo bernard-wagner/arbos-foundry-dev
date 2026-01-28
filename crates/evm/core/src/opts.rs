@@ -89,7 +89,7 @@ pub struct EvmOpts {
     pub create2_deployer: Address,
 
     /// Stylus configuration options.
-    pub stylus_config: Option<StylusConfig>,
+    pub stylus_config: StylusConfig,
 }
 
 impl Default for EvmOpts {
@@ -115,7 +115,7 @@ impl Default for EvmOpts {
             enable_tx_gas_limit: false,
             networks: NetworkConfigs::default(),
             create2_deployer: DEFAULT_CREATE2_DEPLOYER,
-            stylus_config: None,
+            stylus_config: StylusConfig::default(),
         }
     }
 }

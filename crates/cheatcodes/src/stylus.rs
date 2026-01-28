@@ -128,8 +128,7 @@ fn deploy_stylus_code(
         .config
         .evm_opts
         .stylus_config
-        .as_ref()
-        .and_then(|c| c.deployer_address)
+        .deployer_address
         .unwrap_or(DEFAULT_STYLUS_DEPLOYER_ADDRESS);
 
     let outcome = executor.exec_create(

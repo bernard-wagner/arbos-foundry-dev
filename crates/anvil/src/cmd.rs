@@ -277,11 +277,7 @@ impl NodeArgs {
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
             .with_cache_path(self.cache_path)
-            .with_stylus_config(if self.evm.stylus.is_default() {
-                None
-            } else {
-                Some(self.evm.stylus.clone())
-            }))
+            .with_stylus_config(self.evm.stylus.clone()))
     }
 
     fn account_generator(&self) -> AccountGenerator {

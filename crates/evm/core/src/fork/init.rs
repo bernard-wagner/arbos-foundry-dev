@@ -25,7 +25,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
     configs: NetworkConfigs,
-    stylus: Option<StylusConfig>,
+    stylus: StylusConfig,
 ) -> eyre::Result<(Env, N::BlockResponse)> {
     trace!(
         %memory_limit,
@@ -111,10 +111,8 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
-    stylus: Option<StylusConfig>,
+    stylus: StylusConfig,
 ) -> CfgEnv {
-    let stylus = stylus.unwrap_or_default();
-
     let mut cfg = CfgEnv::default();
     cfg.chain_id = chain_id;
     cfg.memory_limit = memory_limit;

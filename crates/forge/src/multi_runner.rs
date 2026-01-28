@@ -388,9 +388,7 @@ impl TestRunnerConfig {
             .build(self.env.clone(), db);
 
         executor.apply_arbitrum_state_overrides(|params| {
-            if let Some(stylus_config) = self.evm_opts.stylus_config.clone() {
-                apply_stylus_config(params, &stylus_config);
-            }
+            apply_stylus_config(params, &self.evm_opts.stylus_config);
         });
 
         executor

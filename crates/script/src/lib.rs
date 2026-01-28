@@ -674,9 +674,7 @@ impl ScriptConfig {
         let mut executor = builder.build(env, db);
 
         executor.apply_arbitrum_state_overrides(|state| {
-            if let Some(stylus_config) = self.evm_opts.stylus_config.clone() {
-                apply_stylus_config(state, &stylus_config);
-            }
+            apply_stylus_config(state, &self.evm_opts.stylus_config);
         });
 
         Ok(ScriptRunner::new(executor, self.evm_opts.clone()))

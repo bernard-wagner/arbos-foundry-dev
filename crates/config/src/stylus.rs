@@ -105,9 +105,3 @@ pub struct StylusConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deployer_address: Option<Address>,
 }
-
-impl StylusConfig {
-    pub fn is_default(&self) -> bool {
-        Self::default() == *self
-    }
-}

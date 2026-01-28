@@ -187,13 +187,11 @@ impl Provider for EvmArgs {
             dict.insert("eth_rpc_url".to_string(), fork_url.clone().into());
         }
 
-        if !self.stylus.is_default() {
-            // serialize stylus args to dict
-            let stylus_dict = Value::serialize(&self.stylus)?
-                .into_dict()
-                .ok_or(InvalidType(Value::serialize(&self.stylus)?.to_actual(), "map".into()))?;
+        let stylus_dict = Value::serialize(&self.stylus)?
+            .into_dict()
+            .ok_or(InvalidType(Value::serialize(&self.stylus)?.to_actual(), "map".into()))?;
 
-            // merge stylus args into main dict under "stylus" key
+        if !stylus_dict.is_empty() {
             dict.insert("stylus".to_string(), Value::from(stylus_dict));
         }
 

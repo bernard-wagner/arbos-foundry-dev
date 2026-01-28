@@ -203,7 +203,7 @@ pub struct NodeConfig {
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
     /// Stylus configuration
-    pub stylus_config: Option<StylusConfig>,
+    pub stylus_config: StylusConfig,
 }
 
 impl NodeConfig {
@@ -497,7 +497,7 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
-            stylus_config: None,
+            stylus_config: StylusConfig::default(),
         }
     }
 }
@@ -1046,7 +1046,7 @@ impl NodeConfig {
     }
 
     #[must_use]
-    pub fn with_stylus_config(mut self, stylus_config: Option<StylusConfig>) -> Self {
+    pub fn with_stylus_config(mut self, stylus_config: StylusConfig) -> Self {
         self.stylus_config = stylus_config;
         self
     }
@@ -1159,15 +1159,13 @@ impl NodeConfig {
         )
         .await?;
 
-        // Apply Arbitrum state overrides if stylus config is provided.
-        if let Some(ref stylus_config) = self.stylus_config {
-            let stylus_config = stylus_config.clone();
-            backend
-                .apply_arbitrum_state_overrides(|params| {
-                    apply_stylus_config(params, &stylus_config);
-                })
-                .await;
-        }
+        // Apply Arbitrum state overrides from stylus config.
+        let stylus_config = self.stylus_config.clone();
+        backend
+            .apply_arbitrum_state_overrides(|params| {
+                apply_stylus_config(params, &stylus_config);
+            })
+            .await;
 
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.
