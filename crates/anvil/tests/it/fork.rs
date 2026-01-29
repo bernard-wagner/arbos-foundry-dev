@@ -23,7 +23,6 @@ use alloy_signer_local::PrivateKeySigner;
 use anvil::{EthereumHardfork, NodeConfig, NodeHandle, PrecompileFactory, eth::EthApi, spawn};
 use foundry_common::provider::get_http_provider;
 use foundry_config::Config;
-use foundry_evm_networks::NetworkConfigs;
 use foundry_test_utils::rpc::{self, next_http_rpc_endpoint, next_rpc_endpoint};
 use futures::StreamExt;
 use std::{

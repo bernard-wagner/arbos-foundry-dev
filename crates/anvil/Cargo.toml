@@ -10,12 +10,21 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+# Disable auto-discovery since we have multiple binaries sharing the same source
+autobins = false
+
 [lints]
 workspace = true
 
 [[bin]]
 name = "arbos-anvil"
 path = "bin/main.rs"
+required-features = ["cli"]
+
+# Alias binary for backwards compatibility and tests
+[[bin]]
+name = "anvil"
+path = "bin/anvil_alias.rs"
 required-features = ["cli"]
 
 [dependencies]

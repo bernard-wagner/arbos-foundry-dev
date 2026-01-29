@@ -350,3 +350,8 @@ pub fn apply_stylus_config(params: &mut ArbosStateParams, override_config: &Styl
         params.stylus_params.max_wasm_size = v;
     }
 }
+
+/// Serde default helper that returns `true`.
+pub fn default_true() -> bool {
+    true
+}

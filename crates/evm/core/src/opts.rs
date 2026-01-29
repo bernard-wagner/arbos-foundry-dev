@@ -89,6 +89,7 @@ pub struct EvmOpts {
     pub create2_deployer: Address,
 
     /// Stylus configuration options.
+    #[serde(default)]
     pub stylus_config: StylusConfig,
 }
 

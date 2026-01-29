@@ -7,6 +7,9 @@ use alloy_primitives::{
     Address, B256, Bytes, Log, U256,
     map::{AddressIndexSet, AddressMap, B256IndexSet, HashMap, IndexSet},
 };
+use arbos_revm::constants::{
+    ARBOS_BATCH_POSTER_ADDRESS, ARBOS_L1_PRICER_FUNDS_ADDRESS, ARBOS_STATE_ADDRESS,
+};
 use foundry_common::{
     compile::Analysis, ignore_metadata_hash, mapping_slots::MappingSlots,
     slot_identifier::SlotIdentifier,
@@ -26,6 +29,17 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 /// This is to limit the performance impact of fuzz tests that might deploy arbitrarily sized
 /// bytecode (as is the case with Solmate).
 const PUSH_BYTE_ANALYSIS_LIMIT: usize = 24 * 1024;
+
+/// Returns true if the address is an ArbOS internal system address.
+///
+/// These addresses contain internal state (L1/L2 pricing, programs, etc.) that
+/// should typically be excluded from the fuzz dictionary.
+#[inline]
+fn is_arbos_address(address: &Address) -> bool {
+    *address == ARBOS_STATE_ADDRESS
+        || *address == ARBOS_BATCH_POSTER_ADDRESS
+        || *address == ARBOS_L1_PRICER_FUNDS_ADDRESS
+}
 
 /// A set of arbitrary 32 byte data from the VM used to generate values for the strategy.
 ///
@@ -198,6 +212,10 @@ impl FuzzDictionary {
     /// These values are persisted across invariant runs.
     fn insert_db_values(&mut self, db_state: Vec<(&Address, &DbAccount)>) {
         for (address, account) in db_state {
+            // Optionally skip ArbOS internal state addresses.
+            if self.config.exclude_arbos_state && is_arbos_address(address) {
+                continue;
+            }
             // Insert basic account information
             self.insert_value(address.into_word());
             // Insert push bytes
@@ -289,6 +307,10 @@ impl FuzzDictionary {
         mapping_slots: Option<&AddressMap<MappingSlots>>,
     ) {
         for (address, account) in state_changeset {
+            // Optionally skip ArbOS internal state addresses.
+            if self.config.exclude_arbos_state && is_arbos_address(address) {
+                continue;
+            }
             // Insert basic account information.
             self.insert_value(address.into_word());
             // Insert push bytes.

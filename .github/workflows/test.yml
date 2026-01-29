@@ -39,7 +39,7 @@ jobs:
         id: gen
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PROFILE: ${{ inputs.profile }}
+          PROFILE: ${{ inputs.profile || 'default' }}
         shell: bash
         run: |
           output=$(python3 .github/scripts/matrices.py)

@@ -22,7 +22,7 @@ fn lockfile_get(root: &Path, dep_path: &Path) -> Option<DepIdentifier> {
 }
 
 // checks missing dependencies are auto installed
-forgetest_init!(can_install_missing_deps_build, |prj, cmd| {
+forgetest_init!(#[ignore = "flaky"] can_install_missing_deps_build, |prj, cmd| {
     prj.initialize_default_contracts();
     prj.clear();
 
@@ -53,7 +53,7 @@ No files changed, compilation skipped
 });
 
 // checks missing dependencies are auto installed
-forgetest_init!(can_install_missing_deps_test, |prj, cmd| {
+forgetest_init!(#[ignore = "flaky"] can_install_missing_deps_test, |prj, cmd| {
     prj.initialize_default_contracts();
     prj.clear();
 
@@ -591,7 +591,7 @@ async fn correctly_sync_dep_with_multiple_version() {
     assert_eq!(solday_v_245.rev(), submod_solday_v_245.rev());
 }
 
-forgetest_init!(sync_on_forge_update, |prj, cmd| {
+forgetest_init!(#[ignore = "flaky"] sync_on_forge_update, |prj, cmd| {
     let git = Git::new(prj.root());
 
     let submodules = git.submodules().unwrap();

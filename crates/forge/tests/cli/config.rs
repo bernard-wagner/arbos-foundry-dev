@@ -118,6 +118,8 @@ endpoints = "all"
 access = "read"
 path = "out"
 
+[profile.default.stylus]
+
 [fmt]
 line_length = 120
 tab_width = 4
@@ -355,6 +357,7 @@ forgetest!(can_extract_config_values, |prj, cmd| {
         additional_compiler_profiles: Default::default(),
         compilation_restrictions: Default::default(),
         script_execution_protection: true,
+        stylus: Default::default(),
         _non_exhaustive: (),
     };
     prj.write_config(input.clone());
@@ -1375,7 +1378,8 @@ forgetest_init!(test_default_config, |prj, cmd| {
   "transaction_timeout": 120,
   "additional_compiler_profiles": [],
   "compilation_restrictions": [],
-  "script_execution_protection": true
+  "script_execution_protection": true,
+  "stylus": {}
 }
 
 "#]]);

@@ -1159,13 +1159,19 @@ impl NodeConfig {
         )
         .await?;
 
-        // Apply Arbitrum state overrides from stylus config.
-        let stylus_config = self.stylus_config.clone();
-        backend
-            .apply_arbitrum_state_overrides(|params| {
-                apply_stylus_config(params, &stylus_config);
-            })
-            .await;
+        // Only apply Arbitrum state overrides if stylus config has explicit settings.
+        // This avoids modifying the state trie when no overrides are needed, which is
+        // important for maintaining consistent Merkle proofs in tests.
+        // The get() function in arbos-revm populates defaults from context (chain_id,
+        // block timestamp, etc.) when values are read.
+        if !self.stylus_config.is_default() {
+            let stylus_config = self.stylus_config.clone();
+            backend
+                .apply_arbitrum_state_overrides(|params| {
+                    apply_stylus_config(params, &stylus_config);
+                })
+                .await;
+        }
 
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.

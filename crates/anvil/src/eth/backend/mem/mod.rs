@@ -97,7 +97,7 @@ use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     core::{
-        evm::{BlockEnv, CfgEnv, EthEvmContext, PrecompilesMap, TxEnv},
+        evm::{BlockEnv, EthEvmContext, PrecompilesMap, TxEnv},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -457,18 +457,18 @@ impl Backend {
 
     /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
     ///
-    /// This creates a temporary journal context, loads or defaults `ArbosStateParams`,
-    /// applies the closure to modify them, initializes the ArbOS state, and commits
-    /// the resulting state changes to the database.
+    /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
+    /// populated from context if state is empty), applies the closure to modify them,
+    /// and only initializes/commits if the params were actually changed.
     pub async fn apply_arbitrum_state_overrides(&self, f: impl FnOnce(&mut ArbosStateParams)) {
-        let is_fork = self.fork.read().is_some();
         let mut db = self.db.write().await;
 
         let changes = {
+            let env = self.env.read();
             let mut context = ArbitrumContext {
-                block: BlockEnv::default(),
+                block: env.evm_env.block_env.clone(),
                 tx: TxEnv::default(),
-                cfg: CfgEnv::default(),
+                cfg: env.evm_env.cfg_env.clone(),
                 journaled_state: Journal::new(&mut **db),
                 chain: (),
                 local: ArbitrumLocalContext::default(),
@@ -477,24 +477,32 @@ impl Backend {
 
             let mut state = context.arb_state(None, false);
 
-            let mut params: ArbosStateParams =
-                if is_fork { state.get().unwrap() } else { ArbosStateParams::default() };
+            // Always use get() which returns current state with defaults populated from context
+            let original_params = state.get().unwrap();
+            let mut params = original_params.clone();
 
             f(&mut params);
 
-            state.initialize(&params).unwrap();
-            context.journaled_state.finalize()
+            // Only write to storage if params were actually modified
+            if params != original_params {
+                state.initialize(&params).unwrap();
+                context.journaled_state.finalize()
+            } else {
+                Default::default()
+            }
         };
 
-        let changes = changes
-            .into_iter()
-            .map(|(address, account)| {
-                let account = account.with_touched_mark();
-                (address, account)
-            })
-            .collect();
+        if !changes.is_empty() {
+            let changes = changes
+                .into_iter()
+                .map(|(address, account)| {
+                    let account = account.with_touched_mark();
+                    (address, account)
+                })
+                .collect();
 
-        db.commit(changes);
+            db.commit(changes);
+        }
     }
 
     /// Sets the account to impersonate

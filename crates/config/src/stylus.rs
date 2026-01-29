@@ -105,3 +105,11 @@ pub struct StylusConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deployer_address: Option<Address>,
 }
+
+impl StylusConfig {
+    /// Returns true if this config is equal to the default config.
+    /// Used for serde skip_serializing_if and conditional ArbOS state initialization.
+    pub fn is_default(&self) -> bool {
+        Self::default() == *self
+    }
+}

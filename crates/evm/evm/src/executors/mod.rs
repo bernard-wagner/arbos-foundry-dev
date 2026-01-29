@@ -31,7 +31,7 @@ use foundry_evm_core::{
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
     },
     decode::{RevertDecoder, SkipReason},
-    evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv},
+    evm::{BlockEnv, EvmEnv, TxEnv},
     utils::StateChangeset,
 };
 use revm::context::TxEnv as BaseTxEnv;
@@ -330,15 +330,18 @@ impl Executor {
         self.inspector().create2_deployer
     }
 
+    /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
+    ///
+    /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
+    /// populated from context if state is empty), applies the closure to modify them,
+    /// and only initializes/commits if the params were actually changed.
     #[inline]
     pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
         let changes = {
-            let is_fork = self.backend.is_in_forking_mode();
-
             let mut context = ArbitrumContext {
-                block: BlockEnv::default(),
+                block: self.env.evm_env.block_env.clone(),
                 tx: TxEnv::default(),
-                cfg: CfgEnv::default(),
+                cfg: self.env.evm_env.cfg_env.clone(),
                 journaled_state: { Journal::new(self.backend.db_mut()) },
                 chain: (),
                 local: ArbitrumLocalContext::default(),
@@ -347,24 +350,32 @@ impl Executor {
 
             let mut state = context.arb_state(None, false);
 
-            let mut params: ArbosStateParams =
-                if is_fork { state.get().unwrap() } else { ArbosStateParams::default() };
+            // Always use get() which returns current state with defaults populated from context
+            let original_params = state.get().unwrap();
+            let mut params = original_params.clone();
 
             f(&mut params);
 
-            state.initialize(&params).unwrap();
-            context.journaled_state.finalize()
+            // Only write to storage if params were actually modified
+            if params != original_params {
+                state.initialize(&params).unwrap();
+                context.journaled_state.finalize()
+            } else {
+                Default::default()
+            }
         };
 
-        let changes = changes
-            .into_iter()
-            .map(|(address, account)| {
-                let account = account.with_touched_mark();
-                (address, account)
-            })
-            .collect();
+        if !changes.is_empty() {
+            let changes = changes
+                .into_iter()
+                .map(|(address, account)| {
+                    let account = account.with_touched_mark();
+                    (address, account)
+                })
+                .collect();
 
-        self.backend.commit(changes);
+            self.backend.commit(changes);
+        }
     }
 
     /// Deploys a contract and commits the new state to the underlying database.
