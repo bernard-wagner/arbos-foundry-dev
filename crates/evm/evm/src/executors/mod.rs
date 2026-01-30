@@ -34,13 +34,12 @@ use foundry_evm_core::{
     evm::{BlockEnv, EvmEnv, TxEnv},
     utils::StateChangeset,
 };
-use revm::context::TxEnv as BaseTxEnv;
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
     Journal,
     bytecode::Bytecode,
-    context::JournalTr,
+    context::{JournalTr, TxEnv as BaseTxEnv},
     context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,

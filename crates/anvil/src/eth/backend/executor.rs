@@ -27,13 +27,20 @@ use alloy_evm::{
     FromRecoveredTx,
     precompiles::{DynPrecompile, Precompile},
 };
-use alloy_primitives::{Address, B256, Bloom, BloomInput, Bytes, Log, Signature, TxKind, U256, address};
+use alloy_primitives::{
+    Address, B256, Bloom, BloomInput, Bytes, Log, Signature, TxKind, U256, address,
+};
 use alloy_sol_types::{SolEvent, sol};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
-use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider, state::{ArbState, ArbStateGetter, types::StorageBackedTr}, transaction::ArbitrumTransaction};
+use arbos_revm::{
+    ArbitrumEvm,
+    precompiles::ArbitrumPrecompileProvider,
+    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
+    transaction::ArbitrumTransaction,
+};
 use foundry_evm::{
     backend::DatabaseError,
     core::{
@@ -112,9 +119,15 @@ impl ExecutedTransaction {
             TypedTransaction::EIP1559(_) => TypedReceipt::EIP1559(receipt_with_bloom),
             TypedTransaction::EIP4844(_) => TypedReceipt::EIP4844(receipt_with_bloom),
             TypedTransaction::EIP7702(_) => TypedReceipt::EIP7702(receipt_with_bloom),
-            TypedTransaction::ArbitrumDeposit(_) => TypedReceipt::ArbitrumDeposit(receipt_with_bloom),
-            TypedTransaction::ArbitrumRetryable(_) => TypedReceipt::ArbitrumRetryable(receipt_with_bloom),
-            TypedTransaction::ArbitrumInternal(_) => TypedReceipt::ArbitrumInternal(receipt_with_bloom),
+            TypedTransaction::ArbitrumDeposit(_) => {
+                TypedReceipt::ArbitrumDeposit(receipt_with_bloom)
+            }
+            TypedTransaction::ArbitrumRetryable(_) => {
+                TypedReceipt::ArbitrumRetryable(receipt_with_bloom)
+            }
+            TypedTransaction::ArbitrumInternal(_) => {
+                TypedReceipt::ArbitrumInternal(receipt_with_bloom)
+            }
         }
     }
 }

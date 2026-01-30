@@ -2,10 +2,7 @@ use std::{fs, path::PathBuf};
 
 use alloy_primitives::{Address, Bytes, U256, address, hex};
 use alloy_sol_types::SolValue;
-use arbos_revm::{
-    state::program::activate_program,
-    stylus_executor::stylus_code,
-};
+use arbos_revm::{state::program::activate_program, stylus_executor::stylus_code};
 use foundry_config::fs_permissions::FsAccessKind;
 use revm::{
     context::{ContextTr, CreateScheme, JournalTr},
@@ -116,11 +113,8 @@ fn deploy_stylus_code(
         if let Some(salt) = salt { CreateScheme::Create2 { salt } } else { CreateScheme::Create };
 
     // StylusDeployer.sol always deploys with 0 value; value is used for initialization only
-    let create_value = if constructor_args.is_some() {
-        U256::ZERO
-    } else {
-        value.unwrap_or(U256::ZERO)
-    };
+    let create_value =
+        if constructor_args.is_some() { U256::ZERO } else { value.unwrap_or(U256::ZERO) };
 
     // Use the configured deployer address as the CREATE caller (matching StylusDeployer.sol)
     let deployer_address = ccx
@@ -181,23 +175,25 @@ fn deploy_stylus_code(
 }
 
 /// Activates a Stylus program by compiling and storing it directly.
-fn activate_stylus_program(
-    ccx: &mut CheatsCtxt,
-    program_address: Address,
-) -> Result<()> {
-    let code_hash = ccx.ecx.journal_mut().code_hash(program_address)
+fn activate_stylus_program(ccx: &mut CheatsCtxt, program_address: Address) -> Result<()> {
+    let code_hash = ccx
+        .ecx
+        .journal_mut()
+        .code_hash(program_address)
         .map_err(|e| fmt_err!("failed to get code hash: {:?}", e))?
         .data;
 
-    let bytecode = ccx.ecx.journal_mut().code(program_address)
-        .ok()
-        .unwrap_or_default()
-        .data;
+    let bytecode = ccx.ecx.journal_mut().code(program_address).ok().unwrap_or_default().data;
 
     let wasm_bytecode = match stylus_code(&bytecode) {
         Ok(Some(code)) => code,
         Ok(None) => return Err(fmt_err!("program is not a Stylus WASM contract")),
-        Err(err) => return Err(fmt_err!("failed to decode Stylus bytecode: {}", String::from_utf8_lossy(&err))),
+        Err(err) => {
+            return Err(fmt_err!(
+                "failed to decode Stylus bytecode: {}",
+                String::from_utf8_lossy(&err)
+            ));
+        }
     };
 
     activate_program(ccx.ecx, code_hash, &wasm_bytecode, true)
@@ -307,7 +303,9 @@ fn brotli_decompress(compressed: &Bytes) -> Result {
 /// Strip all custom and unknown sections from the Wasm binary.
 ///
 /// This removes any user metadata which we do not want to leak as part of the final binary.
-fn strip_user_metadata(wasm_file_bytes: impl AsRef<[u8]>) -> std::result::Result<Vec<u8>, wasmparser::BinaryReaderError> {
+fn strip_user_metadata(
+    wasm_file_bytes: impl AsRef<[u8]>,
+) -> std::result::Result<Vec<u8>, wasmparser::BinaryReaderError> {
     let mut module = Module::new();
     // Parse the input WASM and iterate over the sections
     let parser = Parser::new(0);
@@ -335,7 +333,9 @@ fn strip_user_metadata(wasm_file_bytes: impl AsRef<[u8]>) -> std::result::Result
 ///
 /// This trick removes any dangling mentions of reference types in the wasm body, which are not yet
 /// supported by Arbitrum chain backends.
-fn remove_dangling_references(wasm: impl AsRef<[u8]>) -> std::result::Result<Vec<u8>, RemoveDanglingReferencesError> {
+fn remove_dangling_references(
+    wasm: impl AsRef<[u8]>,
+) -> std::result::Result<Vec<u8>, RemoveDanglingReferencesError> {
     let wat_string = wasmprinter::print_bytes(wasm)
         .map_err(|e| RemoveDanglingReferencesError::Wasm2Wat(e.to_string()))?;
     let wasm = wasmer::wat2wasm(wat_string.as_bytes())

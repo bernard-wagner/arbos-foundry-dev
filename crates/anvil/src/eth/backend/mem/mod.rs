@@ -90,6 +90,11 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -110,11 +115,6 @@ use foundry_evm::{
 };
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use arbos_revm::{
-    ArbitrumContext,
-    local_context::ArbitrumLocalContext,
-    state::{ArbState, ArbosStateParams},
-};
 use revm::{
     DatabaseCommit, Inspector, Journal,
     context::{Block as RevmBlock, Cfg, JournalTr, TxEnv as BaseTxEnv, result::HaltReason},

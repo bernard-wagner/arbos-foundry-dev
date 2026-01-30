@@ -48,7 +48,10 @@ use foundry_evm::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
-use revm::{context::TxEnv as BaseTxEnv, context_interface::block::BlobExcessGasAndPrice, primitives::hardfork::SpecId};
+use revm::{
+    context::TxEnv as BaseTxEnv, context_interface::block::BlobExcessGasAndPrice,
+    primitives::hardfork::SpecId,
+};
 use serde_json::{Value, json};
 use std::{
     fmt::Write as FmtWrite,

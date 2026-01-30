@@ -65,7 +65,9 @@ pub const ARBOS_STATE_ADDRESS: Address = {
 /// - Have no signature (system-generated)
 /// - Skip nonce checks
 /// - Mint balance to `from` then transfer to `to`
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
 pub struct ArbitrumDepositTx {
     /// Chain ID
     pub chain_id: u64,
@@ -116,7 +118,9 @@ impl ArbitrumDepositTx {
 /// - Skip nonce checks
 /// - Sender is always ARBOS_ADDRESS
 /// - Target is always ARBOS_STATE_ADDRESS
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
 pub struct ArbitrumInternalTx {
     /// Chain ID
     pub chain_id: u64,
@@ -390,10 +394,8 @@ pub fn transaction_request_to_typed(
         let beneficiary = other.get_deserialized::<Address>("beneficiary")?.ok()?;
         let max_submission_fee = other.get_deserialized::<U256>("maxSubmissionFee")?.ok()?;
         let fee_refund_addr = other.get_deserialized::<Address>("refundTo")?.ok()?;
-        let retry_to = other
-            .get_deserialized::<Option<Address>>("retryTo")
-            .and_then(Result::ok)
-            .flatten();
+        let retry_to =
+            other.get_deserialized::<Option<Address>>("retryTo").and_then(Result::ok).flatten();
         let retry_data =
             other.get_deserialized::<Bytes>("retryData").and_then(Result::ok).unwrap_or_default();
 
@@ -802,7 +804,8 @@ impl TypedTransaction {
         }
     }
 
-    /// Returns true if the transaction uses dynamic fees: EIP1559, EIP4844, EIP7702, or ArbitrumRetryable
+    /// Returns true if the transaction uses dynamic fees: EIP1559, EIP4844, EIP7702, or
+    /// ArbitrumRetryable
     pub fn is_dynamic_fee(&self) -> bool {
         matches!(
             self,
@@ -1181,9 +1184,7 @@ impl TypedTransaction {
             Self::EIP4844(tx) => *tx.signature(),
             Self::EIP7702(tx) => *tx.signature(),
             // Arbitrum system transactions have no signature
-            Self::ArbitrumDeposit(_)
-            | Self::ArbitrumInternal(_)
-            | Self::ArbitrumRetryable(_) => {
+            Self::ArbitrumDeposit(_) | Self::ArbitrumInternal(_) | Self::ArbitrumRetryable(_) => {
                 Signature::from_scalars_and_parity(B256::ZERO, B256::ZERO, false)
             }
         }
@@ -1415,8 +1416,12 @@ impl TypedReceipt {
             Self::EIP4844(r) => TypedReceiptRpc::EIP4844(convert_receipt_to_rpc(r)),
             Self::EIP7702(r) => TypedReceiptRpc::EIP7702(convert_receipt_to_rpc(r)),
             Self::ArbitrumDeposit(r) => TypedReceiptRpc::ArbitrumDeposit(convert_receipt_to_rpc(r)),
-            Self::ArbitrumRetryable(r) => TypedReceiptRpc::ArbitrumRetryable(convert_receipt_to_rpc(r)),
-            Self::ArbitrumInternal(r) => TypedReceiptRpc::ArbitrumInternal(convert_receipt_to_rpc(r)),
+            Self::ArbitrumRetryable(r) => {
+                TypedReceiptRpc::ArbitrumRetryable(convert_receipt_to_rpc(r))
+            }
+            Self::ArbitrumInternal(r) => {
+                TypedReceiptRpc::ArbitrumInternal(convert_receipt_to_rpc(r))
+            }
         }
     }
 
@@ -1670,7 +1675,8 @@ impl Decodable for TypedReceipt {
                     <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumDeposit)
                 } else if receipt_type == ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE {
                     buf.advance(1);
-                    <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumRetryable)
+                    <ReceiptWithBloom as Decodable>::decode(buf)
+                        .map(TypedReceipt::ArbitrumRetryable)
                 } else if receipt_type == ARBITRUM_INTERNAL_TX_TYPE {
                     buf.advance(1);
                     <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumInternal)

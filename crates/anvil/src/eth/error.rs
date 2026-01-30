@@ -11,8 +11,8 @@ use anvil_rpc::{
     error::{ErrorCode, RpcError},
     response::ResponseResult,
 };
-use foundry_evm::{backend::DatabaseError, decode::RevertDecoder};
 use arbos_revm::transaction::ArbitrumTransactionError;
+use foundry_evm::{backend::DatabaseError, decode::RevertDecoder};
 use revm::{
     context_interface::result::{EVMError, InvalidHeader, InvalidTransaction},
     interpreter::InstructionResult,

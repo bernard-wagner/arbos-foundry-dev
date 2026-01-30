@@ -3,7 +3,6 @@ use crate::{
     evm::{BlockEnv, CfgEnv, TxEnv},
     utils::apply_chain_and_block_specific_env_changes,
 };
-use revm::context::TxEnv as BaseTxEnv;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
@@ -11,6 +10,7 @@ use alloy_rpc_types::BlockNumberOrTag;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
 use foundry_config::stylus::StylusConfig;
 use foundry_evm_networks::NetworkConfigs;
+use revm::context::TxEnv as BaseTxEnv;
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.
@@ -68,7 +68,8 @@ pub async fn environment<N: Network, P: Provider<N>>(
         eyre::bail!("failed to get {bn_msg}{latest_msg}");
     };
 
-    let cfg = configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit, stylus);
+    let cfg =
+        configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit, stylus);
 
     let mut env = Env {
         evm_env: EvmEnv {

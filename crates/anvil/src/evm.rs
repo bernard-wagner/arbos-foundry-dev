@@ -36,12 +36,18 @@ where
     I: Inspector<EthEvmContext<DB>, EthInterpreter>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
 {
-    pub fn transact(&mut self, tx: TxEnv) -> Result<ResultAndState, EVMError<DB::Error, ArbitrumTransactionError>> {
+    pub fn transact(
+        &mut self,
+        tx: TxEnv,
+    ) -> Result<ResultAndState, EVMError<DB::Error, ArbitrumTransactionError>> {
         use revm::InspectEvm;
         self.0.inspect_tx(tx)
     }
 
-    pub fn transact_commit(&mut self, tx: TxEnv) -> Result<ExecutionResult, EVMError<DB::Error, ArbitrumTransactionError>>
+    pub fn transact_commit(
+        &mut self,
+        tx: TxEnv,
+    ) -> Result<ExecutionResult, EVMError<DB::Error, ArbitrumTransactionError>>
     where
         DB: DatabaseCommit,
     {
@@ -58,9 +64,8 @@ mod tests {
     use alloy_evm::precompiles::{DynPrecompile, PrecompileInput};
     use alloy_primitives::{Address, Bytes, TxKind, address};
     use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
-    use foundry_evm::core::evm::{EthEvmContext, LocalContext, PrecompilesMap};
+    use foundry_evm::core::evm::{EthEvmContext, LocalContext, PrecompilesMap, TxEnv};
     use itertools::Itertools;
-    use foundry_evm::core::evm::TxEnv;
     use revm::{
         Journal,
         context::{JournalTr, TxEnv as BaseTxEnv},

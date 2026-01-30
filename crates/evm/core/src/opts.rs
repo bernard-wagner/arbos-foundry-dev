@@ -5,7 +5,6 @@ use crate::{
     evm::{BlockEnv, TxEnv},
     fork::{CreateFork, configure_env},
 };
-use revm::context::TxEnv as BaseTxEnv;
 use alloy_network::Network;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, network::AnyRpcBlock};
@@ -16,6 +15,7 @@ use foundry_common::{
 };
 use foundry_config::{Chain, Config, GasLimit, stylus::StylusConfig};
 use foundry_evm_networks::NetworkConfigs;
+use revm::context::TxEnv as BaseTxEnv;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use url::Url;
