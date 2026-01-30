@@ -2836,12 +2836,7 @@ impl Backend {
             inspector,
             |result, cache_db, mut inspector, tx_env, env| {
                 inspector
-                    .json_result(
-                        result,
-                        &*tx_env,
-                        &env.evm_env.block_env,
-                        &cache_db,
-                    )
+                    .json_result(result, &*tx_env, &env.evm_env.block_env, &cache_db)
                     .map_err(|e| BlockchainError::Message(e.to_string()))
             },
         )??;
