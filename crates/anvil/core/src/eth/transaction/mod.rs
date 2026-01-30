@@ -11,8 +11,8 @@ use alloy_consensus::{
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
 use alloy_evm::FromRecoveredTx;
 use alloy_network::{AnyReceiptEnvelope, AnyRpcTransaction, AnyTransactionReceipt, AnyTxEnvelope};
-use alloy_primitives::{Address, B256, Bloom, Bytes, Signature, TxHash, TxKind, U256};
-use alloy_rlp::{Decodable, Encodable, Header};
+use alloy_primitives::{Address, B256, Bloom, Bytes, Signature, TxHash, TxKind, U256, keccak256};
+use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types::{
     AccessList, ConversionError, Transaction as RpcTransaction, TransactionReceipt,
     request::TransactionRequest, trace::otterscan::OtsReceipt,
@@ -25,6 +25,331 @@ use revm::{context::TxEnv, interpreter::InstructionResult};
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, Mul};
 
+// Arbitrum transaction type constants
+pub const ARBITRUM_DEPOSIT_TX_TYPE: u8 = 0x64;
+pub const ARBITRUM_INTERNAL_TX_TYPE: u8 = 0x6A;
+pub const ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE: u8 = 0x69;
+
+/// ArbRetryableTx precompile address
+pub const ARB_RETRYABLE_TX_ADDRESS: Address = {
+    let mut bytes = [0u8; 20];
+    bytes[19] = 0x6e;
+    Address::new(bytes)
+};
+
+/// Function selector for submitRetryable
+const SUBMIT_RETRYABLE_SELECTOR: [u8; 4] = [0xc9, 0xf9, 0x5d, 0x32];
+
+/// ArbOS address used as sender for internal transactions
+pub const ARBOS_ADDRESS: Address = {
+    let mut bytes = [0u8; 20];
+    bytes[17] = 0x0A;
+    bytes[18] = 0x4B;
+    bytes[19] = 0x05;
+    Address::new(bytes)
+};
+
+/// ArbOS state address - target for internal transactions
+pub const ARBOS_STATE_ADDRESS: Address = {
+    let mut bytes = [0xFFu8; 20];
+    bytes[0] = 0xA4;
+    bytes[1] = 0xB0;
+    bytes[2] = 0x5F;
+    Address::new(bytes)
+};
+
+/// Arbitrum Deposit Transaction (type 0x64)
+///
+/// Represents an L1 to L2 ETH deposit. These transactions:
+/// - Have no gas cost (gas is 0)
+/// - Have no signature (system-generated)
+/// - Skip nonce checks
+/// - Mint balance to `from` then transfer to `to`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
+pub struct ArbitrumDepositTx {
+    /// Chain ID
+    pub chain_id: u64,
+    /// L1 request ID for tracking and replay protection
+    pub l1_request_id: B256,
+    /// Source address (balance will be minted here first)
+    pub from: Address,
+    /// Destination address (receives the value)
+    pub to: Address,
+    /// Amount of ETH to deposit (in wei)
+    pub value: U256,
+}
+
+impl ArbitrumDepositTx {
+    /// Transaction type identifier
+    pub const TX_TYPE: u8 = ARBITRUM_DEPOSIT_TX_TYPE;
+
+    /// Create a new deposit transaction
+    pub fn new(
+        chain_id: u64,
+        l1_request_id: B256,
+        from: Address,
+        to: Address,
+        value: U256,
+    ) -> Self {
+        Self { chain_id, l1_request_id, from, to, value }
+    }
+
+    /// Compute the hash of the deposit transaction
+    pub fn hash(&self) -> B256 {
+        let mut buf = Vec::new();
+        buf.push(Self::TX_TYPE);
+        self.encode(&mut buf);
+        keccak256(&buf)
+    }
+
+    /// Returns the sender of this transaction (the `from` field)
+    pub fn recover_signer(&self) -> Address {
+        self.from
+    }
+}
+
+/// Arbitrum Internal Transaction (type 0x6A)
+///
+/// System-level transactions for ArbOS state updates. These transactions:
+/// - Have no gas cost (gas is 0)
+/// - Have no signature (system-generated)
+/// - Skip nonce checks
+/// - Sender is always ARBOS_ADDRESS
+/// - Target is always ARBOS_STATE_ADDRESS
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
+pub struct ArbitrumInternalTx {
+    /// Chain ID
+    pub chain_id: u64,
+    /// Encoded instruction data (method selector + parameters)
+    pub data: Bytes,
+}
+
+impl ArbitrumInternalTx {
+    /// Transaction type identifier
+    pub const TX_TYPE: u8 = ARBITRUM_INTERNAL_TX_TYPE;
+
+    /// Create a new internal transaction
+    pub fn new(chain_id: u64, data: Bytes) -> Self {
+        Self { chain_id, data }
+    }
+
+    /// Compute the hash of the internal transaction
+    pub fn hash(&self) -> B256 {
+        let mut buf = Vec::new();
+        buf.push(Self::TX_TYPE);
+        self.encode(&mut buf);
+        keccak256(&buf)
+    }
+
+    /// Returns the sender of this transaction (always ARBOS_ADDRESS)
+    pub fn recover_signer(&self) -> Address {
+        ARBOS_ADDRESS
+    }
+}
+
+/// Arbitrum Submit Retryable Transaction (type 0x69)
+///
+/// Used to submit retryable tickets from L1. These transactions:
+/// - Create a retryable ticket in ArbOS state
+/// - Mint deposit value to sender
+/// - Escrow the retry value
+/// - May auto-redeem if sufficient gas provided
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArbitrumSubmitRetryableTx {
+    #[serde(rename = "chainId")]
+    pub chain_id: u64,
+    #[serde(rename = "requestId")]
+    pub request_id: B256,
+    pub from: Address,
+    #[serde(rename = "l1BaseFee")]
+    pub l1_base_fee: U256,
+    #[serde(rename = "depositValue")]
+    pub deposit_value: U256,
+    #[serde(rename = "maxFeePerGas")]
+    pub gas_fee_cap: U256,
+    pub gas: u64,
+    #[serde(rename = "retryTo", default)]
+    pub retry_to: Option<Address>,
+    #[serde(rename = "retryValue")]
+    pub retry_value: U256,
+    pub beneficiary: Address,
+    #[serde(rename = "maxSubmissionFee")]
+    pub max_submission_fee: U256,
+    #[serde(rename = "refundTo")]
+    pub fee_refund_addr: Address,
+    #[serde(rename = "retryData", default)]
+    pub retry_data: Bytes,
+    #[serde(skip, default)]
+    encoded_data: Bytes,
+}
+
+impl ArbitrumSubmitRetryableTx {
+    /// Transaction type identifier
+    pub const TX_TYPE: u8 = ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE;
+
+    pub fn gas_fee_cap_u128(&self) -> u128 {
+        self.gas_fee_cap.saturating_to::<u128>()
+    }
+
+    fn rlp_payload_length(&self) -> usize {
+        self.chain_id.length()
+            + self.request_id.length()
+            + self.from.length()
+            + self.l1_base_fee.length()
+            + self.deposit_value.length()
+            + self.gas_fee_cap.length()
+            + self.gas.length()
+            + match self.retry_to {
+                Some(to) => to.length(),
+                None => Bytes::new().length(),
+            }
+            + self.retry_value.length()
+            + self.beneficiary.length()
+            + self.max_submission_fee.length()
+            + self.fee_refund_addr.length()
+            + self.retry_data.length()
+    }
+
+    fn encode_fields(&self, out: &mut dyn BufMut) {
+        self.chain_id.encode(out);
+        self.request_id.encode(out);
+        self.from.encode(out);
+        self.l1_base_fee.encode(out);
+        self.deposit_value.encode(out);
+        self.gas_fee_cap.encode(out);
+        self.gas.encode(out);
+        match self.retry_to {
+            Some(to) => to.encode(out),
+            None => Bytes::new().encode(out),
+        }
+        self.retry_value.encode(out);
+        self.beneficiary.encode(out);
+        self.max_submission_fee.encode(out);
+        self.fee_refund_addr.encode(out);
+        self.retry_data.encode(out);
+    }
+
+    fn build_calldata(&self) -> Bytes {
+        let retry_to = self.retry_to.unwrap_or_default();
+        let mut data = Vec::new();
+        data.extend_from_slice(self.request_id.as_slice());
+        data.extend_from_slice(&self.l1_base_fee.to_be_bytes::<32>());
+        data.extend_from_slice(&self.deposit_value.to_be_bytes::<32>());
+        data.extend_from_slice(&self.retry_value.to_be_bytes::<32>());
+        data.extend_from_slice(&self.gas_fee_cap.to_be_bytes::<32>());
+        data.extend_from_slice(&U256::from(self.gas).to_be_bytes::<32>());
+        data.extend_from_slice(&self.max_submission_fee.to_be_bytes::<32>());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(self.fee_refund_addr.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(self.beneficiary.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(retry_to.as_slice());
+        let offset = (data.len() + 32) as u64;
+        data.extend_from_slice(&U256::from(offset).to_be_bytes::<32>());
+        let retry_len = self.retry_data.len() as u64;
+        data.extend_from_slice(&U256::from(retry_len).to_be_bytes::<32>());
+        data.extend_from_slice(self.retry_data.as_ref());
+        let extra = self.retry_data.len() % 32;
+        if extra > 0 {
+            data.extend_from_slice(&vec![0u8; 32 - extra]);
+        }
+
+        let mut out = Vec::with_capacity(4 + data.len());
+        out.extend_from_slice(&SUBMIT_RETRYABLE_SELECTOR);
+        out.extend_from_slice(&data);
+        out.into()
+    }
+
+    pub fn with_encoded_data(mut self) -> Self {
+        self.encoded_data = self.build_calldata();
+        self
+    }
+
+    pub fn encoded_data(&self) -> &Bytes {
+        &self.encoded_data
+    }
+
+    pub fn hash(&self) -> B256 {
+        let mut out = Vec::new();
+        out.push(Self::TX_TYPE);
+        out.extend_from_slice(&alloy_rlp::encode(self));
+        B256::from_slice(keccak256(&out).as_slice())
+    }
+
+    pub fn recover_signer(&self) -> Address {
+        self.from
+    }
+}
+
+impl Encodable for ArbitrumSubmitRetryableTx {
+    fn encode(&self, out: &mut dyn BufMut) {
+        Header { list: true, payload_length: self.rlp_payload_length() }.encode(out);
+        self.encode_fields(out);
+    }
+
+    fn length(&self) -> usize {
+        Header { list: true, payload_length: self.rlp_payload_length() }.length_with_payload()
+    }
+}
+
+impl Decodable for ArbitrumSubmitRetryableTx {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+        let chain_id = Decodable::decode(buf)?;
+        let request_id = Decodable::decode(buf)?;
+        let from = Decodable::decode(buf)?;
+        let l1_base_fee = Decodable::decode(buf)?;
+        let deposit_value = Decodable::decode(buf)?;
+        let gas_fee_cap = Decodable::decode(buf)?;
+        let gas = Decodable::decode(buf)?;
+        let retry_to_bytes: Bytes = Decodable::decode(buf)?;
+        let retry_to = if retry_to_bytes.is_empty() {
+            None
+        } else if retry_to_bytes.len() == 20 {
+            Some(Address::from_slice(&retry_to_bytes))
+        } else {
+            return Err(alloy_rlp::Error::Custom("invalid retryTo length"));
+        };
+        let retry_value = Decodable::decode(buf)?;
+        let beneficiary = Decodable::decode(buf)?;
+        let max_submission_fee = Decodable::decode(buf)?;
+        let fee_refund_addr = Decodable::decode(buf)?;
+        let retry_data = Decodable::decode(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: header.payload_length,
+                got: remaining - buf.len(),
+            });
+        }
+
+        let mut tx = Self {
+            chain_id,
+            request_id,
+            from,
+            l1_base_fee,
+            deposit_value,
+            gas_fee_cap,
+            gas,
+            retry_to,
+            retry_value,
+            beneficiary,
+            max_submission_fee,
+            fee_refund_addr,
+            retry_data,
+            encoded_data: Bytes::new(),
+        };
+        tx.encoded_data = tx.build_calldata();
+        Ok(tx)
+    }
+}
+
 /// Converts a [TransactionRequest] into a [TypedTransactionRequest].
 /// Should be removed once the call builder abstraction for providers is in place.
 pub fn transaction_request_to_typed(
@@ -33,7 +358,7 @@ pub fn transaction_request_to_typed(
     let WithOtherFields::<TransactionRequest> {
         inner:
             TransactionRequest {
-                from: _,
+                from,
                 to,
                 gas_price,
                 max_fee_per_gas,
@@ -48,10 +373,52 @@ pub fn transaction_request_to_typed(
                 sidecar,
                 transaction_type,
                 authorization_list,
-                chain_id: _,
+                chain_id,
             },
-        ..
+        other,
     } = tx;
+
+    // Check for Arbitrum submit retryable transaction
+    let is_retryable_tx = transaction_type == Some(ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE)
+        || other.contains_key("requestId");
+
+    if is_retryable_tx {
+        let request_id = other.get_deserialized::<B256>("requestId")?.ok()?;
+        let l1_base_fee = other.get_deserialized::<U256>("l1BaseFee")?.ok()?;
+        let deposit_value = other.get_deserialized::<U256>("depositValue")?.ok()?;
+        let retry_value = other.get_deserialized::<U256>("retryValue")?.ok()?;
+        let beneficiary = other.get_deserialized::<Address>("beneficiary")?.ok()?;
+        let max_submission_fee = other.get_deserialized::<U256>("maxSubmissionFee")?.ok()?;
+        let fee_refund_addr = other.get_deserialized::<Address>("refundTo")?.ok()?;
+        let retry_to = other
+            .get_deserialized::<Option<Address>>("retryTo")
+            .and_then(Result::ok)
+            .flatten();
+        let retry_data =
+            other.get_deserialized::<Bytes>("retryData").and_then(Result::ok).unwrap_or_default();
+
+        let gas_fee_cap = max_fee_per_gas.or(gas_price).unwrap_or_default();
+
+        return Some(TypedTransactionRequest::ArbitrumRetryable(
+            ArbitrumSubmitRetryableTx {
+                chain_id: chain_id.unwrap_or_default(),
+                request_id,
+                from: from?,
+                l1_base_fee,
+                deposit_value,
+                gas_fee_cap: U256::from(gas_fee_cap),
+                gas: gas.unwrap_or_default(),
+                retry_to,
+                retry_value,
+                beneficiary,
+                max_submission_fee,
+                fee_refund_addr,
+                retry_data,
+                encoded_data: Bytes::new(),
+            }
+            .with_encoded_data(),
+        ));
+    }
 
     // EIP7702
     if transaction_type == Some(4) || authorization_list.is_some() {
@@ -164,6 +531,7 @@ pub enum TypedTransactionRequest {
     EIP1559(TxEip1559),
     EIP7702(TxEip7702),
     EIP4844(TxEip4844Variant),
+    ArbitrumRetryable(ArbitrumSubmitRetryableTx),
 }
 
 /// A wrapper for [TypedTransaction] that allows impersonating accounts.
@@ -373,6 +741,12 @@ pub enum TypedTransaction {
     EIP4844(Signed<TxEip4844Variant>),
     /// EIP-7702 transaction
     EIP7702(Signed<TxEip7702>),
+    /// Arbitrum Deposit transaction (type 0x64)
+    ArbitrumDeposit(ArbitrumDepositTx),
+    /// Arbitrum Internal transaction (type 0x6A)
+    ArbitrumInternal(ArbitrumInternalTx),
+    /// Arbitrum Submit Retryable transaction (type 0x69)
+    ArbitrumRetryable(ArbitrumSubmitRetryableTx),
 }
 
 impl TryFrom<AnyRpcTransaction> for TypedTransaction {
@@ -380,6 +754,7 @@ impl TryFrom<AnyRpcTransaction> for TypedTransaction {
 
     fn try_from(value: AnyRpcTransaction) -> Result<Self, Self::Error> {
         let WithOtherFields { inner, .. } = value.0;
+        let from = inner.inner.signer();
         match inner.inner.into_inner() {
             AnyTxEnvelope::Ethereum(tx) => match tx {
                 TxEnvelope::Legacy(tx) => Ok(Self::Legacy(tx)),
@@ -388,13 +763,31 @@ impl TryFrom<AnyRpcTransaction> for TypedTransaction {
                 TxEnvelope::Eip4844(tx) => Ok(Self::EIP4844(tx)),
                 TxEnvelope::Eip7702(tx) => Ok(Self::EIP7702(tx)),
             },
-            AnyTxEnvelope::Unknown(_) => Err(ConversionError::Custom("UnknownTxType".to_string())),
+            AnyTxEnvelope::Unknown(unknown) => {
+                if unknown.inner.ty.0 != ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE {
+                    return Err(ConversionError::Custom("UnknownTxType".to_string()));
+                }
+
+                let mut fields = unknown.inner.fields;
+                if fields.get_deserialized::<Address>("from").is_none() {
+                    fields.insert_value("from".to_string(), from).map_err(|_| {
+                        ConversionError::Custom("InvalidRetryableTxFields".to_string())
+                    })?;
+                }
+
+                let retryable = fields
+                    .deserialize_into::<ArbitrumSubmitRetryableTx>()
+                    .map_err(|_| ConversionError::Custom("InvalidRetryableTxFields".to_string()))?
+                    .with_encoded_data();
+                Ok(Self::ArbitrumRetryable(retryable))
+            }
         }
     }
 }
 
 impl TypedTransaction {
     /// Converts the transaction into a [`TxEnvelope`].
+    /// Returns Err(self) for Arbitrum-specific transaction types that don't map to TxEnvelope.
     pub fn try_into_eth(self) -> Result<TxEnvelope, Self> {
         match self {
             Self::Legacy(tx) => Ok(TxEnvelope::Legacy(tx)),
@@ -402,12 +795,34 @@ impl TypedTransaction {
             Self::EIP1559(tx) => Ok(TxEnvelope::Eip1559(tx)),
             Self::EIP4844(tx) => Ok(TxEnvelope::Eip4844(tx)),
             Self::EIP7702(tx) => Ok(TxEnvelope::Eip7702(tx)),
+            // Arbitrum types cannot be converted to standard TxEnvelope
+            tx @ Self::ArbitrumDeposit(_)
+            | tx @ Self::ArbitrumInternal(_)
+            | tx @ Self::ArbitrumRetryable(_) => Err(tx),
         }
     }
 
-    /// Returns true if the transaction uses dynamic fees: EIP1559, EIP4844 or EIP7702
+    /// Returns true if the transaction uses dynamic fees: EIP1559, EIP4844, EIP7702, or ArbitrumRetryable
     pub fn is_dynamic_fee(&self) -> bool {
-        matches!(self, Self::EIP1559(_) | Self::EIP4844(_) | Self::EIP7702(_))
+        matches!(
+            self,
+            Self::EIP1559(_) | Self::EIP4844(_) | Self::EIP7702(_) | Self::ArbitrumRetryable(_)
+        )
+    }
+
+    /// Returns true if this is an Arbitrum deposit transaction
+    pub fn is_arbitrum_deposit(&self) -> bool {
+        matches!(self, Self::ArbitrumDeposit(_))
+    }
+
+    /// Returns true if this is an Arbitrum internal transaction
+    pub fn is_arbitrum_internal(&self) -> bool {
+        matches!(self, Self::ArbitrumInternal(_))
+    }
+
+    /// Returns true if this is an Arbitrum system transaction (deposit or internal)
+    pub fn is_arbitrum_system_tx(&self) -> bool {
+        self.is_arbitrum_deposit() || self.is_arbitrum_internal()
     }
 
     pub fn gas_price(&self) -> u128 {
@@ -417,6 +832,9 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().max_fee_per_gas,
             Self::EIP4844(tx) => tx.tx().tx().max_fee_per_gas,
             Self::EIP7702(tx) => tx.tx().max_fee_per_gas,
+            Self::ArbitrumRetryable(tx) => tx.gas_fee_cap_u128(),
+            // Arbitrum system transactions have no gas price
+            Self::ArbitrumDeposit(_) | Self::ArbitrumInternal(_) => 0,
         }
     }
 
@@ -427,26 +845,35 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().gas_limit,
             Self::EIP4844(tx) => tx.tx().tx().gas_limit,
             Self::EIP7702(tx) => tx.tx().gas_limit,
+            Self::ArbitrumRetryable(tx) => tx.gas,
+            // Arbitrum system transactions have no gas limit
+            Self::ArbitrumDeposit(_) | Self::ArbitrumInternal(_) => 0,
         }
     }
 
     pub fn value(&self) -> U256 {
-        U256::from(match self {
+        match self {
             Self::Legacy(tx) => tx.tx().value,
             Self::EIP2930(tx) => tx.tx().value,
             Self::EIP1559(tx) => tx.tx().value,
             Self::EIP4844(tx) => tx.tx().tx().value,
             Self::EIP7702(tx) => tx.tx().value,
-        })
+            Self::ArbitrumDeposit(tx) => tx.value,
+            Self::ArbitrumInternal(_) | Self::ArbitrumRetryable(_) => U256::ZERO,
+        }
     }
 
     pub fn data(&self) -> &Bytes {
+        static EMPTY_BYTES: Bytes = Bytes::new();
         match self {
             Self::Legacy(tx) => &tx.tx().input,
             Self::EIP2930(tx) => &tx.tx().input,
             Self::EIP1559(tx) => &tx.tx().input,
             Self::EIP4844(tx) => &tx.tx().tx().input,
             Self::EIP7702(tx) => &tx.tx().input,
+            Self::ArbitrumDeposit(_) => &EMPTY_BYTES,
+            Self::ArbitrumInternal(tx) => &tx.data,
+            Self::ArbitrumRetryable(tx) => tx.encoded_data(),
         }
     }
 
@@ -458,6 +885,9 @@ impl TypedTransaction {
             Self::EIP1559(_) => Some(2),
             Self::EIP4844(_) => Some(3),
             Self::EIP7702(_) => Some(4),
+            Self::ArbitrumDeposit(_) => Some(ARBITRUM_DEPOSIT_TX_TYPE),
+            Self::ArbitrumInternal(_) => Some(ARBITRUM_INTERNAL_TX_TYPE),
+            Self::ArbitrumRetryable(_) => Some(ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE),
         }
     }
 
@@ -577,6 +1007,48 @@ impl TypedTransaction {
                 chain_id: Some(t.tx().chain_id),
                 access_list: t.tx().access_list.clone(),
             },
+            Self::ArbitrumDeposit(t) => TransactionEssentials {
+                kind: TxKind::Call(t.to),
+                input: Bytes::new(),
+                nonce: 0,
+                gas_limit: 0,
+                gas_price: Some(0),
+                max_fee_per_gas: None,
+                max_priority_fee_per_gas: None,
+                max_fee_per_blob_gas: None,
+                blob_versioned_hashes: None,
+                value: t.value,
+                chain_id: Some(t.chain_id),
+                access_list: Default::default(),
+            },
+            Self::ArbitrumInternal(t) => TransactionEssentials {
+                kind: TxKind::Call(ARBOS_STATE_ADDRESS),
+                input: t.data.clone(),
+                nonce: 0,
+                gas_limit: 0,
+                gas_price: Some(0),
+                max_fee_per_gas: None,
+                max_priority_fee_per_gas: None,
+                max_fee_per_blob_gas: None,
+                blob_versioned_hashes: None,
+                value: U256::ZERO,
+                chain_id: Some(t.chain_id),
+                access_list: Default::default(),
+            },
+            Self::ArbitrumRetryable(t) => TransactionEssentials {
+                kind: TxKind::Call(ARB_RETRYABLE_TX_ADDRESS),
+                input: t.encoded_data().clone(),
+                nonce: 0,
+                gas_limit: t.gas,
+                gas_price: None,
+                max_fee_per_gas: Some(t.gas_fee_cap_u128()),
+                max_priority_fee_per_gas: Some(0),
+                max_fee_per_blob_gas: None,
+                blob_versioned_hashes: None,
+                value: U256::ZERO,
+                chain_id: Some(t.chain_id),
+                access_list: Default::default(),
+            },
         }
     }
 
@@ -587,6 +1059,8 @@ impl TypedTransaction {
             Self::EIP1559(t) => t.tx().nonce,
             Self::EIP4844(t) => t.tx().tx().nonce,
             Self::EIP7702(t) => t.tx().nonce,
+            // Arbitrum system transactions have nonce 0
+            Self::ArbitrumDeposit(_) | Self::ArbitrumInternal(_) | Self::ArbitrumRetryable(_) => 0,
         }
     }
 
@@ -597,6 +1071,9 @@ impl TypedTransaction {
             Self::EIP1559(t) => Some(t.tx().chain_id),
             Self::EIP4844(t) => Some(t.tx().tx().chain_id),
             Self::EIP7702(t) => Some(t.tx().chain_id),
+            Self::ArbitrumDeposit(t) => Some(t.chain_id),
+            Self::ArbitrumInternal(t) => Some(t.chain_id),
+            Self::ArbitrumRetryable(t) => Some(t.chain_id),
         }
     }
 
@@ -643,6 +1120,9 @@ impl TypedTransaction {
             Self::EIP1559(t) => *t.hash(),
             Self::EIP4844(t) => *t.hash(),
             Self::EIP7702(t) => *t.hash(),
+            Self::ArbitrumDeposit(t) => t.hash(),
+            Self::ArbitrumInternal(t) => t.hash(),
+            Self::ArbitrumRetryable(t) => t.hash(),
         }
     }
 
@@ -657,6 +1137,7 @@ impl TypedTransaction {
     }
 
     /// Recovers the Ethereum address which was used to sign the transaction.
+    /// For Arbitrum system transactions, returns the known sender address.
     pub fn recover(&self) -> Result<Address, alloy_primitives::SignatureError> {
         match self {
             Self::Legacy(tx) => tx.recover_signer(),
@@ -664,6 +1145,10 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.recover_signer(),
             Self::EIP4844(tx) => tx.recover_signer(),
             Self::EIP7702(tx) => tx.recover_signer(),
+            // Arbitrum system transactions have deterministic senders
+            Self::ArbitrumDeposit(tx) => Ok(tx.recover_signer()),
+            Self::ArbitrumInternal(tx) => Ok(tx.recover_signer()),
+            Self::ArbitrumRetryable(tx) => Ok(tx.recover_signer()),
         }
     }
 
@@ -675,6 +1160,9 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().to,
             Self::EIP4844(tx) => TxKind::Call(tx.tx().tx().to),
             Self::EIP7702(tx) => TxKind::Call(tx.tx().to),
+            Self::ArbitrumDeposit(tx) => TxKind::Call(tx.to),
+            Self::ArbitrumInternal(_) => TxKind::Call(ARBOS_STATE_ADDRESS),
+            Self::ArbitrumRetryable(_) => TxKind::Call(ARB_RETRYABLE_TX_ADDRESS),
         }
     }
 
@@ -683,7 +1171,8 @@ impl TypedTransaction {
         self.kind().to().copied()
     }
 
-    /// Returns the Signature of the transaction
+    /// Returns the Signature of the transaction.
+    /// Arbitrum system transactions have no signature (returns zero signature).
     pub fn signature(&self) -> Signature {
         match self {
             Self::Legacy(tx) => *tx.signature(),
@@ -691,6 +1180,36 @@ impl TypedTransaction {
             Self::EIP1559(tx) => *tx.signature(),
             Self::EIP4844(tx) => *tx.signature(),
             Self::EIP7702(tx) => *tx.signature(),
+            // Arbitrum system transactions have no signature
+            Self::ArbitrumDeposit(_)
+            | Self::ArbitrumInternal(_)
+            | Self::ArbitrumRetryable(_) => {
+                Signature::from_scalars_and_parity(B256::ZERO, B256::ZERO, false)
+            }
+        }
+    }
+
+    /// Returns the ArbitrumDepositTx if this is a deposit transaction
+    pub fn as_arbitrum_deposit(&self) -> Option<&ArbitrumDepositTx> {
+        match self {
+            Self::ArbitrumDeposit(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the ArbitrumInternalTx if this is an internal transaction
+    pub fn as_arbitrum_internal(&self) -> Option<&ArbitrumInternalTx> {
+        match self {
+            Self::ArbitrumInternal(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// Returns the ArbitrumSubmitRetryableTx if this is a retryable transaction
+    pub fn as_arbitrum_retryable(&self) -> Option<&ArbitrumSubmitRetryableTx> {
+        match self {
+            Self::ArbitrumRetryable(tx) => Some(tx),
+            _ => None,
         }
     }
 }
@@ -733,6 +1252,10 @@ impl Encodable2718 for TypedTransaction {
             Self::EIP1559(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
             Self::EIP4844(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
             Self::EIP7702(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
+            // Arbitrum types: 1 byte for type + RLP encoding
+            Self::ArbitrumDeposit(tx) => 1 + tx.length(),
+            Self::ArbitrumInternal(tx) => 1 + tx.length(),
+            Self::ArbitrumRetryable(tx) => 1 + tx.length(),
         }
     }
 
@@ -743,12 +1266,42 @@ impl Encodable2718 for TypedTransaction {
             Self::EIP1559(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
             Self::EIP4844(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
             Self::EIP7702(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
+            Self::ArbitrumDeposit(tx) => {
+                out.put_u8(ARBITRUM_DEPOSIT_TX_TYPE);
+                tx.encode(out);
+            }
+            Self::ArbitrumInternal(tx) => {
+                out.put_u8(ARBITRUM_INTERNAL_TX_TYPE);
+                tx.encode(out);
+            }
+            Self::ArbitrumRetryable(tx) => {
+                out.put_u8(ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE);
+                tx.encode(out);
+            }
         }
     }
 }
 
 impl Decodable2718 for TypedTransaction {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Result<Self, Eip2718Error> {
+        // Handle Arbitrum types first
+        if ty == ARBITRUM_DEPOSIT_TX_TYPE {
+            return ArbitrumDepositTx::decode(buf)
+                .map(Self::ArbitrumDeposit)
+                .map_err(Eip2718Error::RlpError);
+        }
+        if ty == ARBITRUM_INTERNAL_TX_TYPE {
+            return ArbitrumInternalTx::decode(buf)
+                .map(Self::ArbitrumInternal)
+                .map_err(Eip2718Error::RlpError);
+        }
+        if ty == ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE {
+            return ArbitrumSubmitRetryableTx::decode(buf)
+                .map(Self::ArbitrumRetryable)
+                .map_err(Eip2718Error::RlpError);
+        }
+
+        // Fall through to standard types
         match TxEnvelope::typed_decode(ty, buf)? {
             TxEnvelope::Eip2930(tx) => Ok(Self::EIP2930(tx)),
             TxEnvelope::Eip1559(tx) => Ok(Self::EIP1559(tx)),
@@ -822,6 +1375,12 @@ pub enum TypedReceipt {
     EIP4844(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
     #[serde(rename = "0x4", alias = "0x04")]
     EIP7702(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
+    #[serde(rename = "0x64")]
+    ArbitrumDeposit(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
+    #[serde(rename = "0x69")]
+    ArbitrumRetryable(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
+    #[serde(rename = "0x6a")]
+    ArbitrumInternal(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
 }
 
 /// RPC-specific variant of TypedReceipt for boundary conversion
@@ -838,6 +1397,12 @@ pub enum TypedReceiptRpc {
     EIP4844(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
     #[serde(rename = "0x4", alias = "0x04")]
     EIP7702(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
+    #[serde(rename = "0x64")]
+    ArbitrumDeposit(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
+    #[serde(rename = "0x69")]
+    ArbitrumRetryable(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
+    #[serde(rename = "0x6a")]
+    ArbitrumInternal(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
 }
 
 impl TypedReceipt {
@@ -849,6 +1414,9 @@ impl TypedReceipt {
             Self::EIP1559(r) => TypedReceiptRpc::EIP1559(convert_receipt_to_rpc(r)),
             Self::EIP4844(r) => TypedReceiptRpc::EIP4844(convert_receipt_to_rpc(r)),
             Self::EIP7702(r) => TypedReceiptRpc::EIP7702(convert_receipt_to_rpc(r)),
+            Self::ArbitrumDeposit(r) => TypedReceiptRpc::ArbitrumDeposit(convert_receipt_to_rpc(r)),
+            Self::ArbitrumRetryable(r) => TypedReceiptRpc::ArbitrumRetryable(convert_receipt_to_rpc(r)),
+            Self::ArbitrumInternal(r) => TypedReceiptRpc::ArbitrumInternal(convert_receipt_to_rpc(r)),
         }
     }
 
@@ -858,7 +1426,10 @@ impl TypedReceipt {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => r,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => r,
         }
     }
 
@@ -868,7 +1439,10 @@ impl TypedReceipt {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => &r.receipt.logs,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => &r.receipt.logs,
         }
     }
 
@@ -878,7 +1452,10 @@ impl TypedReceipt {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => &r.logs_bloom,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => &r.logs_bloom,
         }
     }
 
@@ -910,7 +1487,10 @@ impl TypedReceiptRpc {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => r,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => r,
         }
     }
 
@@ -920,7 +1500,10 @@ impl TypedReceiptRpc {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => &r.logs_bloom,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => &r.logs_bloom,
         }
     }
 
@@ -930,7 +1513,10 @@ impl TypedReceiptRpc {
             | Self::EIP1559(r)
             | Self::EIP2930(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => &r.receipt.logs,
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => &r.receipt.logs,
         }
     }
 
@@ -947,7 +1533,10 @@ impl From<TypedReceiptRpc> for ReceiptWithBloom<Receipt<alloy_rpc_types::Log>> {
             | TypedReceiptRpc::EIP1559(r)
             | TypedReceiptRpc::EIP2930(r)
             | TypedReceiptRpc::EIP4844(r)
-            | TypedReceiptRpc::EIP7702(r) => r,
+            | TypedReceiptRpc::EIP7702(r)
+            | TypedReceiptRpc::ArbitrumDeposit(r)
+            | TypedReceiptRpc::ArbitrumRetryable(r)
+            | TypedReceiptRpc::ArbitrumInternal(r) => r,
         }
     }
 }
@@ -960,7 +1549,10 @@ impl From<TypedReceiptRpc> for OtsReceipt {
             TypedReceiptRpc::EIP1559(_) => 0x02,
             TypedReceiptRpc::EIP4844(_) => 0x03,
             TypedReceiptRpc::EIP7702(_) => 0x04,
-        } as u8;
+            TypedReceiptRpc::ArbitrumDeposit(_) => ARBITRUM_DEPOSIT_TX_TYPE,
+            TypedReceiptRpc::ArbitrumRetryable(_) => ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE,
+            TypedReceiptRpc::ArbitrumInternal(_) => ARBITRUM_INTERNAL_TX_TYPE,
+        };
         let receipt = ReceiptWithBloom::<Receipt<alloy_rpc_types::Log>>::from(value);
         let status = receipt.status();
         let cumulative_gas_used = receipt.cumulative_gas_used();
@@ -993,6 +1585,9 @@ impl Encodable for TypedReceipt {
                     Self::EIP1559(r) => r.length() + 1,
                     Self::EIP4844(r) => r.length() + 1,
                     Self::EIP7702(r) => r.length() + 1,
+                    Self::ArbitrumDeposit(r) => r.length() + 1,
+                    Self::ArbitrumRetryable(r) => r.length() + 1,
+                    Self::ArbitrumInternal(r) => r.length() + 1,
                     _ => unreachable!("receipt already matched"),
                 };
 
@@ -1015,6 +1610,21 @@ impl Encodable for TypedReceipt {
                     Self::EIP7702(r) => {
                         Header { list: true, payload_length: payload_len }.encode(out);
                         4u8.encode(out);
+                        r.encode(out);
+                    }
+                    Self::ArbitrumDeposit(r) => {
+                        Header { list: true, payload_length: payload_len }.encode(out);
+                        ARBITRUM_DEPOSIT_TX_TYPE.encode(out);
+                        r.encode(out);
+                    }
+                    Self::ArbitrumRetryable(r) => {
+                        Header { list: true, payload_length: payload_len }.encode(out);
+                        ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE.encode(out);
+                        r.encode(out);
+                    }
+                    Self::ArbitrumInternal(r) => {
+                        Header { list: true, payload_length: payload_len }.encode(out);
+                        ARBITRUM_INTERNAL_TX_TYPE.encode(out);
                         r.encode(out);
                     }
                     _ => unreachable!("receipt already matched"),
@@ -1055,6 +1665,15 @@ impl Decodable for TypedReceipt {
                 } else if receipt_type == 0x04 {
                     buf.advance(1);
                     <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::EIP7702)
+                } else if receipt_type == ARBITRUM_DEPOSIT_TX_TYPE {
+                    buf.advance(1);
+                    <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumDeposit)
+                } else if receipt_type == ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE {
+                    buf.advance(1);
+                    <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumRetryable)
+                } else if receipt_type == ARBITRUM_INTERNAL_TX_TYPE {
+                    buf.advance(1);
+                    <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::ArbitrumInternal)
                 } else {
                     Err(alloy_rlp::Error::Custom("invalid receipt type"))
                 }
@@ -1077,6 +1696,9 @@ impl Typed2718 for TypedReceipt {
             Self::EIP1559(_) => alloy_consensus::constants::EIP1559_TX_TYPE_ID,
             Self::EIP4844(_) => alloy_consensus::constants::EIP4844_TX_TYPE_ID,
             Self::EIP7702(_) => alloy_consensus::constants::EIP7702_TX_TYPE_ID,
+            Self::ArbitrumDeposit(_) => ARBITRUM_DEPOSIT_TX_TYPE,
+            Self::ArbitrumRetryable(_) => ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE,
+            Self::ArbitrumInternal(_) => ARBITRUM_INTERNAL_TX_TYPE,
         }
     }
 }
@@ -1089,6 +1711,9 @@ impl Encodable2718 for TypedReceipt {
             Self::EIP1559(r) => ReceiptEnvelope::Eip1559(r.clone()).encode_2718_len(),
             Self::EIP4844(r) => ReceiptEnvelope::Eip4844(r.clone()).encode_2718_len(),
             Self::EIP7702(r) => 1 + r.length(),
+            Self::ArbitrumDeposit(r) => 1 + r.length(),
+            Self::ArbitrumRetryable(r) => 1 + r.length(),
+            Self::ArbitrumInternal(r) => 1 + r.length(),
         }
     }
 
@@ -1101,13 +1726,34 @@ impl Encodable2718 for TypedReceipt {
             | Self::EIP2930(r)
             | Self::EIP1559(r)
             | Self::EIP4844(r)
-            | Self::EIP7702(r) => r.encode(out),
+            | Self::EIP7702(r)
+            | Self::ArbitrumDeposit(r)
+            | Self::ArbitrumRetryable(r)
+            | Self::ArbitrumInternal(r) => r.encode(out),
         }
     }
 }
 
 impl Decodable2718 for TypedReceipt {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Result<Self, Eip2718Error> {
+        // Handle Arbitrum types first
+        if ty == ARBITRUM_DEPOSIT_TX_TYPE {
+            return <ReceiptWithBloom as Decodable>::decode(buf)
+                .map(Self::ArbitrumDeposit)
+                .map_err(Eip2718Error::RlpError);
+        }
+        if ty == ARBITRUM_SUBMIT_RETRYABLE_TX_TYPE {
+            return <ReceiptWithBloom as Decodable>::decode(buf)
+                .map(Self::ArbitrumRetryable)
+                .map_err(Eip2718Error::RlpError);
+        }
+        if ty == ARBITRUM_INTERNAL_TX_TYPE {
+            return <ReceiptWithBloom as Decodable>::decode(buf)
+                .map(Self::ArbitrumInternal)
+                .map_err(Eip2718Error::RlpError);
+        }
+
+        // Fall through to standard types
         match ReceiptEnvelope::typed_decode(ty, buf)? {
             ReceiptEnvelope::Eip2930(tx) => Ok(Self::EIP2930(tx)),
             ReceiptEnvelope::Eip1559(tx) => Ok(Self::EIP1559(tx)),
@@ -1183,6 +1829,40 @@ impl FromRecoveredTx<TypedTransaction> for TxEnv {
                 Self::from_recovered_tx(signed_tx.tx().tx(), caller)
             }
             TypedTransaction::EIP7702(signed_tx) => Self::from_recovered_tx(signed_tx.tx(), caller),
+            // Arbitrum system transactions - create minimal TxEnv
+            TypedTransaction::ArbitrumDeposit(deposit_tx) => Self {
+                caller: deposit_tx.from,
+                gas_limit: 0, // No gas limit for deposit tx
+                gas_price: 0, // No gas price
+                kind: revm::primitives::TxKind::Call(deposit_tx.to),
+                value: deposit_tx.value,
+                data: Bytes::new(),
+                nonce: 0,
+                chain_id: Some(deposit_tx.chain_id),
+                ..Default::default()
+            },
+            TypedTransaction::ArbitrumInternal(internal_tx) => Self {
+                caller: ARBOS_ADDRESS,
+                gas_limit: 0, // No gas limit for internal tx
+                gas_price: 0, // No gas price
+                kind: revm::primitives::TxKind::Call(ARBOS_STATE_ADDRESS),
+                value: revm::primitives::U256::ZERO,
+                data: internal_tx.data.clone(),
+                nonce: 0,
+                chain_id: Some(internal_tx.chain_id),
+                ..Default::default()
+            },
+            TypedTransaction::ArbitrumRetryable(retryable_tx) => Self {
+                caller: retryable_tx.from,
+                gas_limit: retryable_tx.gas,
+                gas_price: retryable_tx.gas_fee_cap_u128(),
+                kind: revm::primitives::TxKind::Call(ARB_RETRYABLE_TX_ADDRESS),
+                value: retryable_tx.deposit_value,
+                data: retryable_tx.build_calldata(),
+                nonce: 0,
+                chain_id: Some(retryable_tx.chain_id),
+                ..Default::default()
+            },
         }
     }
 }

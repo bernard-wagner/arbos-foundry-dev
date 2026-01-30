@@ -103,6 +103,10 @@ impl Signer for DevSigner {
             TypedTransactionRequest::EIP1559(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
             TypedTransactionRequest::EIP7702(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
             TypedTransactionRequest::EIP4844(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
+            // Arbitrum retryable txs don't need signing - they come from L1 bridge
+            TypedTransactionRequest::ArbitrumRetryable(_) => {
+                Err(BlockchainError::NoSignerAvailable)
+            }
         }
     }
 }
@@ -130,6 +134,8 @@ pub fn build_typed_transaction(
         TypedTransactionRequest::EIP4844(tx) => {
             TypedTransaction::EIP4844(tx.into_signed(signature))
         }
+        // Arbitrum retryable txs are already complete, just wrap them
+        TypedTransactionRequest::ArbitrumRetryable(tx) => TypedTransaction::ArbitrumRetryable(tx),
     };
 
     Ok(tx)

@@ -14,7 +14,7 @@ use crate::{
     mem::inspector::AnvilInspector,
 };
 use alloy_consensus::{
-    Header, Receipt, ReceiptWithBloom, constants::EMPTY_WITHDRAWALS,
+    Header, Receipt, ReceiptWithBloom, Signed, TxLegacy, constants::EMPTY_WITHDRAWALS,
     proofs::calculate_receipt_root, transaction::Either,
 };
 use alloy_eips::{
@@ -27,12 +27,13 @@ use alloy_evm::{
     FromRecoveredTx,
     precompiles::{DynPrecompile, Precompile},
 };
-use alloy_primitives::{B256, Bloom, BloomInput, Log};
+use alloy_primitives::{Address, B256, Bloom, BloomInput, Bytes, Log, Signature, TxKind, U256, address};
+use alloy_sol_types::{SolEvent, sol};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
-use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider, transaction::ArbitrumTransaction};
+use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider, state::{ArbState, ArbStateGetter, types::StorageBackedTr}, transaction::ArbitrumTransaction};
 use foundry_evm::{
     backend::DatabaseError,
     core::{
@@ -51,7 +52,30 @@ use revm::{
     interpreter::InstructionResult,
     primitives::hardfork::SpecId,
 };
-use std::{fmt::Debug, sync::Arc};
+use std::{collections::VecDeque, fmt::Debug, sync::Arc};
+
+const ARB_RETRYABLE_TX_ADDRESS: Address = address!("0x000000000000000000000000000000000000006e");
+const MIN_RETRYABLE_GAS: u64 = 21_000;
+
+sol! {
+    event RedeemScheduled(
+        bytes32 indexed ticketId,
+        bytes32 indexed retryTxHash,
+        uint64 indexed sequenceNum,
+        uint64 donatedGas,
+        address gasDonor,
+        uint256 maxRefund,
+        uint256 submissionFeeRefund
+    );
+}
+
+#[derive(Debug)]
+struct RetryableTxInfo {
+    from: Address,
+    to: Address,
+    call_value: U256,
+    calldata: Bytes,
+}
 
 /// Represents an executed transaction (transacted on the DB)
 #[derive(Debug)]
@@ -88,6 +112,9 @@ impl ExecutedTransaction {
             TypedTransaction::EIP1559(_) => TypedReceipt::EIP1559(receipt_with_bloom),
             TypedTransaction::EIP4844(_) => TypedReceipt::EIP4844(receipt_with_bloom),
             TypedTransaction::EIP7702(_) => TypedReceipt::EIP7702(receipt_with_bloom),
+            TypedTransaction::ArbitrumDeposit(_) => TypedReceipt::ArbitrumDeposit(receipt_with_bloom),
+            TypedTransaction::ArbitrumRetryable(_) => TypedReceipt::ArbitrumRetryable(receipt_with_bloom),
+            TypedTransaction::ArbitrumInternal(_) => TypedReceipt::ArbitrumInternal(receipt_with_bloom),
         }
     }
 }
@@ -111,7 +138,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     /// type used to validate before inclusion
     pub validator: &'a V,
     /// all pending transactions
-    pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
+    pub pending: VecDeque<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
     pub cfg_env: CfgEnv,
@@ -161,7 +188,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         let excess_blob_gas = if is_cancun { self.block_env.blob_excess_gas() } else { None };
         let mut cumulative_blob_gas_used = if is_cancun { Some(0u64) } else { None };
 
-        for tx in self.into_iter() {
+        while let Some(tx) = (&mut self).next() {
             let tx = match tx {
                 TransactionExecutionOutcome::Executed(tx) => {
                     included.push(tx.transaction.clone());
@@ -206,6 +233,14 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
 
             let ExecutedTransaction { transaction, logs, out, traces, exit_reason: exit, .. } = tx;
             build_logs_bloom(&logs, &mut bloom);
+
+            // Check for scheduled retryable transactions
+            let retryables = self.retryable_transactions_from_logs(&logs);
+            if !retryables.is_empty() {
+                for retryable in retryables.into_iter().rev() {
+                    self.pending.push_front(retryable);
+                }
+            }
 
             let contract_address = out.as_ref().and_then(|out| {
                 if let Output::Create(_, contract_address) = out {
@@ -305,6 +340,112 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
 
         Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
     }
+
+    fn retryable_transactions_from_logs(&mut self, logs: &[Log]) -> Vec<Arc<PoolTransaction>> {
+        let mut retryables = Vec::new();
+        for log in logs {
+            let Some((ticket_id, donated_gas)) = self.retryable_schedule_from_log(log) else {
+                continue;
+            };
+            if let Some(tx) = self.retryable_transaction_from_ticket(ticket_id, donated_gas) {
+                retryables.push(tx);
+            }
+        }
+        retryables
+    }
+
+    fn retryable_schedule_from_log(&self, log: &Log) -> Option<(B256, u64)> {
+        if log.address != ARB_RETRYABLE_TX_ADDRESS {
+            return None;
+        }
+
+        let topics = log.topics();
+        if topics.first()? != &RedeemScheduled::SIGNATURE_HASH {
+            return None;
+        }
+
+        let ticket_id = *topics.get(1)?;
+        let donated_gas = donated_gas_from_log(log)?;
+
+        Some((ticket_id, donated_gas))
+    }
+
+    fn retryable_transaction_from_ticket(
+        &mut self,
+        ticket_id: B256,
+        donated_gas: u64,
+    ) -> Option<Arc<PoolTransaction>> {
+        if donated_gas == 0 {
+            return None;
+        }
+
+        let retryable = self.load_retryable_info(ticket_id)?;
+
+        let account = match self.db.basic(retryable.from) {
+            Ok(account) => account.unwrap_or_default(),
+            Err(err) => {
+                trace!(target: "backend", ?ticket_id, ?err, "Failed to load retryable sender");
+                return None;
+            }
+        };
+
+        let gas_limit = donated_gas.max(MIN_RETRYABLE_GAS);
+        let gas_price = if self.cfg_env.spec.is_enabled_in(SpecId::LONDON) {
+            self.block_env.basefee as u128
+        } else {
+            0
+        };
+
+        let tx = TxLegacy {
+            chain_id: None,
+            nonce: account.nonce,
+            gas_price,
+            gas_limit,
+            to: TxKind::Call(retryable.to),
+            value: retryable.call_value,
+            input: retryable.calldata,
+        };
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        let signed = Signed::new_unchecked(tx, signature, B256::ZERO);
+        let typed = TypedTransaction::Legacy(signed);
+        let pending = PendingTransaction::with_impersonated(typed, retryable.from);
+
+        Some(Arc::new(PoolTransaction::new(pending)))
+    }
+
+    fn load_retryable_info(&mut self, ticket_id: B256) -> Option<RetryableTxInfo> {
+        let mut journal = Journal::new(WrapDatabaseRef(&*self.db));
+        journal.set_spec_id(self.cfg_env.spec);
+        let mut context = EthEvmContext {
+            journaled_state: journal,
+            block: self.block_env.clone(),
+            cfg: self.cfg_env.clone(),
+            tx: TxEnv::default().into(),
+            chain: (),
+            local: LocalContext::default(),
+            error: Ok(()),
+        };
+
+        let mut arb_state = context.arb_state(None, true);
+        let mut retryable = arb_state.retryable(ticket_id);
+
+        let from = retryable.from().get().ok()?;
+        let to = retryable.to().get().ok()?;
+        let call_value = retryable.callvalue().get().ok()?;
+        let calldata = retryable.calldata().get().ok()?.into();
+
+        Some(RetryableTxInfo { from, to, call_value, calldata })
+    }
+}
+
+fn donated_gas_from_log(log: &Log) -> Option<u64> {
+    let data = log.data.data.as_ref();
+    if data.len() < 32 {
+        return None;
+    }
+    let mut donated_bytes = [0u8; 8];
+    donated_bytes.copy_from_slice(&data[24..32]);
+    Some(u64::from_be_bytes(donated_bytes))
 }
 
 /// Represents the result of a single transaction execution attempt
@@ -328,7 +469,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
     type Item = TransactionExecutionOutcome;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let transaction = self.pending.next()?;
+        let transaction = self.pending.pop_front()?;
         let sender = *transaction.pending_transaction.sender();
         let account = match self.db.basic(sender).map(|acc| acc.unwrap_or_default()) {
             Ok(account) => account,

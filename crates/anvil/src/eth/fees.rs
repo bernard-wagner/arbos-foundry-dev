@@ -307,6 +307,10 @@ impl FeeHistoryService {
                                 .tx()
                                 .max_priority_fee_per_gas
                                 .min(t.tx().max_fee_per_gas.saturating_sub(base_fee)),
+                            // Arbitrum system transactions have no gas fees
+                            Some(TypedTransaction::ArbitrumDeposit(_))
+                            | Some(TypedTransaction::ArbitrumRetryable(_))
+                            | Some(TypedTransaction::ArbitrumInternal(_)) => 0,
                             None => 0,
                         };
 

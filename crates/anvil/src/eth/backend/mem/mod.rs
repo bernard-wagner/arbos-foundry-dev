@@ -1315,7 +1315,7 @@ impl Backend {
         let executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
-            pending: pool_transactions.into_iter(),
+            pending: pool_transactions.into(),
             block_env: env.evm_env.block_env.clone(),
             cfg_env: env.evm_env.cfg_env,
             parent_hash: storage.best_hash,
@@ -1404,7 +1404,7 @@ impl Backend {
                 let executor = TransactionExecutor {
                     db: &mut **db,
                     validator: self,
-                    pending: pool_transactions.into_iter(),
+                    pending: pool_transactions.into(),
                     block_env: env.evm_env.block_env.clone(),
                     cfg_env: env.evm_env.cfg_env.clone(),
                     parent_hash: best_hash,
@@ -2773,7 +2773,7 @@ impl Backend {
             let executor = TransactionExecutor {
                 db: &mut cache_db,
                 validator: self,
-                pending: pool_txs.into_iter(),
+                pending: pool_txs.into(),
                 block_env: env.evm_env.block_env.clone(),
                 cfg_env: env.evm_env.cfg_env.clone(),
                 parent_hash: block.header.parent_hash,
@@ -3144,6 +3144,10 @@ impl Backend {
                 .base_fee_per_gas
                 .map_or(self.base_fee() as u128, |g| g as u128)
                 .saturating_add(t.tx().max_priority_fee_per_gas),
+            // Arbitrum system transactions have no gas price (or use their own L1-provided gas)
+            TypedTransaction::ArbitrumDeposit(_)
+            | TypedTransaction::ArbitrumRetryable(_)
+            | TypedTransaction::ArbitrumInternal(_) => 0,
         };
 
         let receipts = self.get_receipts(block.body.transactions.iter().map(|tx| tx.hash()));
@@ -3187,6 +3191,15 @@ impl Backend {
             TypedReceipt::EIP2930(_) => TypedReceiptRpc::EIP2930(receipt_with_bloom),
             TypedReceipt::EIP4844(_) => TypedReceiptRpc::EIP4844(receipt_with_bloom),
             TypedReceipt::EIP7702(_) => TypedReceiptRpc::EIP7702(receipt_with_bloom),
+            TypedReceipt::ArbitrumDeposit(_) => {
+                TypedReceiptRpc::ArbitrumDeposit(receipt_with_bloom)
+            }
+            TypedReceipt::ArbitrumRetryable(_) => {
+                TypedReceiptRpc::ArbitrumRetryable(receipt_with_bloom)
+            }
+            TypedReceipt::ArbitrumInternal(_) => {
+                TypedReceiptRpc::ArbitrumInternal(receipt_with_bloom)
+            }
         };
 
         let inner = TransactionReceipt {

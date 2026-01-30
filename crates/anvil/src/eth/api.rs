@@ -3396,6 +3396,10 @@ impl EthApi {
                     }
                 })
             }
+            // Arbitrum retryable txs come from L1 with their own gas/nonce settings
+            Some(TypedTransactionRequest::ArbitrumRetryable(m)) => {
+                TypedTransactionRequest::ArbitrumRetryable(m)
+            }
             None => return Err(BlockchainError::FailedToDecodeTransaction),
         };
         Ok(request)
@@ -3419,7 +3423,8 @@ impl EthApi {
             TypedTransactionRequest::EIP2930(_)
             | TypedTransactionRequest::EIP1559(_)
             | TypedTransactionRequest::EIP7702(_)
-            | TypedTransactionRequest::EIP4844(_) => Signature::from_scalars_and_parity(
+            | TypedTransactionRequest::EIP4844(_)
+            | TypedTransactionRequest::ArbitrumRetryable(_) => Signature::from_scalars_and_parity(
                 B256::with_last_byte(1),
                 B256::with_last_byte(1),
                 false,
@@ -3493,6 +3498,10 @@ impl EthApi {
             TypedTransaction::EIP4844(_) => self.backend.ensure_eip4844_active(),
             TypedTransaction::EIP7702(_) => self.backend.ensure_eip7702_active(),
             TypedTransaction::Legacy(_) => Ok(()),
+            // Arbitrum system transactions are always supported
+            TypedTransaction::ArbitrumDeposit(_)
+            | TypedTransaction::ArbitrumRetryable(_)
+            | TypedTransaction::ArbitrumInternal(_) => Ok(()),
         }
     }
 }
@@ -3544,6 +3553,8 @@ fn determine_base_gas_by_kind(request: &WithOtherFields<TransactionRequest>) -> 
                 TxKind::Create => MIN_CREATE_GAS,
             },
             TypedTransactionRequest::EIP4844(_) => MIN_TRANSACTION_GAS,
+            // Arbitrum retryable txs use their own gas from L1
+            TypedTransactionRequest::ArbitrumRetryable(_) => MIN_TRANSACTION_GAS,
         },
         // Tighten the gas limit upwards if we don't know the transaction type to avoid deployments
         // failing.
