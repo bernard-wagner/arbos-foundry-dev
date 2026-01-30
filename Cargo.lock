@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.0.1"
-source = "git+https://github.com/iosiro/arbos-revm?rev=8a6759ea80b2dd2bc81f054f58e2700027240365#8a6759ea80b2dd2bc81f054f58e2700027240365"
+source = "git+https://github.com/iosiro/arbos-revm?rev=a48b8f016568c85fa2c05b96886e97dfde1de6f4#a48b8f016568c85fa2c05b96886e97dfde1de6f4"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -1235,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "arbutil"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "digest 0.10.7",
  "eyre",
@@ -2498,7 +2498,7 @@ checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 [[package]]
 name = "brotli"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "cc",
  "lazy_static",
@@ -2624,7 +2624,7 @@ dependencies = [
 [[package]]
 name = "caller-env"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "brotli",
  "rand 0.8.5",
@@ -4754,7 +4754,7 @@ dependencies = [
 [[package]]
 name = "forward"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "eyre",
  "structopt",
@@ -8282,7 +8282,7 @@ dependencies = [
 [[package]]
 name = "prover"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "arbutil",
  "bincode",
@@ -10361,7 +10361,7 @@ dependencies = [
 [[package]]
 name = "stylus"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "arbutil",
  "brotli",
@@ -11519,7 +11519,7 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 [[package]]
 name = "user-host-trait"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "arbutil",
  "caller-env",
@@ -11803,7 +11803,7 @@ dependencies = [
 [[package]]
 name = "wasmer"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -11831,7 +11831,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "backtrace",
  "bytes",
@@ -11859,7 +11859,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-cranelift"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -11877,7 +11877,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-singlepass"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "byteorder",
  "dynasm",
@@ -11894,7 +11894,7 @@ dependencies = [
 [[package]]
 name = "wasmer-derive"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -11905,7 +11905,7 @@ dependencies = [
 [[package]]
 name = "wasmer-types"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "bytecheck",
  "enum-iterator 0.7.0",
@@ -11924,7 +11924,7 @@ dependencies = [
 [[package]]
 name = "wasmer-vm"
 version = "4.3.7"
-source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=43057faaa01a180cd3e2fab221da210dfe4ac905#43057faaa01a180cd3e2fab221da210dfe4ac905"
+source = "git+https://github.com/iosiro/arbos-foundry-stylus?rev=b58c678eaa0611b5593c9f9502e35a2e1aa45851#b58c678eaa0611b5593c9f9502e35a2e1aa45851"
 dependencies = [
  "backtrace",
  "cc",
