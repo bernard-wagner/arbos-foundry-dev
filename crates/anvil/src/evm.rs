@@ -21,6 +21,14 @@ pub trait PrecompileFactory: Send + Sync + Unpin + Debug {
 pub struct AnvilEvm<DB: Database, I, P>(pub EthEvm<DB, I, P>);
 
 impl<DB: Database, I, P> AnvilEvm<DB, I, P> {
+    pub fn inspector(&self) -> &I {
+        &self.0.0.inspector
+    }
+
+    pub fn inspector_mut(&mut self) -> &mut I {
+        &mut self.0.0.inspector
+    }
+
     pub fn precompiles(&self) -> &P {
         &self.0.0.precompiles
     }
@@ -108,6 +116,7 @@ mod tests {
     type TestCfgEnv = foundry_evm::core::evm::CfgEnv;
 
     /// Creates a new EVM instance with the custom precompile factory.
+    #[allow(clippy::type_complexity)]
     fn create_eth_evm(
         spec: SpecId,
     ) -> (

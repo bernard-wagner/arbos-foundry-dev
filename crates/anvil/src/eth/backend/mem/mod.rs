@@ -2020,7 +2020,6 @@ impl Backend {
                     }
                     #[cfg(feature = "js-tracer")]
                     GethDebugTracerType::JsTracer(code) => {
-                        use alloy_evm::IntoTxEnv;
                         let config = tracer_config.into_json();
                         let mut inspector =
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
@@ -2032,7 +2031,7 @@ impl Backend {
                         let result = evm.transact(env.tx.clone())?;
                         let res = evm
                             .inspector_mut()
-                            .json_result(result, &env.tx.into_tx_env(), &block, &cache_db)
+                            .json_result(result, &*env.tx, &block, &cache_db)
                             .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
                         Ok(GethTrace::JS(res))
@@ -2839,7 +2838,7 @@ impl Backend {
                 inspector
                     .json_result(
                         result,
-                        &alloy_evm::IntoTxEnv::into_tx_env(tx_env),
+                        &*tx_env,
                         &env.evm_env.block_env,
                         &cache_db,
                     )
