@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity ^0.8.18;
 
-import "ds-test/test.sol";
-import "cheats/Vm.sol";
+import "utils/Test.sol";
 
 interface StylusDeployer {
     function deploy(bytes calldata bytecode, bytes calldata initData, uint256 initValue, bytes32 salt)
