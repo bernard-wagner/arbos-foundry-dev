@@ -16,7 +16,7 @@ impl NetworkConfigs {
     }
 
     pub fn bypass_prevrandao(&self, _chain_id: u64) -> bool {
-        false
+        true
     }
 
     /// Inject precompiles for configured networks.

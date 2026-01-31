@@ -36,7 +36,7 @@ contract TestPayableContractWithArgs {
 }
 
 contract DeployCodeTest is Test {
-    address public constant overrideAddress = 0x0000000000000000000000000000000000000064;
+    address public constant overrideAddress = 0x1000000000000000000000000000000000000064;
 
     event Payload(address sender, address target, bytes data);
 
