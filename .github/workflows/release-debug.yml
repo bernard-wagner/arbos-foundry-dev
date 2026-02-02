@@ -144,7 +144,7 @@ jobs:
             --no-default-features --features "$RUST_FEATURES")
 
           # `jemalloc` is not fully supported on MSVC or aarch64 Linux.
-          if [[ "$TARGET" != *msvc* && "$TARGET" != "aarch64-unknown-linux-gnu" ]]; then
+          if [[ "$TARGET" != *msvc* && "$TARGET" != aarch64-unknown-linux-* ]]; then
             flags+=(--features jemalloc)
           fi
 
