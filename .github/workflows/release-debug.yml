@@ -123,6 +123,8 @@ jobs:
           # Rust expects the compiler to be named <arch>-linux-musl-gcc
           arch="${TARGET%%-*}"
           sudo ln -s /usr/bin/musl-gcc /usr/local/bin/${arch}-linux-musl-gcc
+          # Ensure musl compiler can find Linux kernel headers (linux/magic.h, etc.)
+          printf 'C_INCLUDE_PATH=/usr/include\n' >> "$GITHUB_ENV"          
 
       - name: Build binaries
         env:
