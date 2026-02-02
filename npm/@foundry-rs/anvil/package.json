@@ -5,21 +5,21 @@
   "homepage": "https://getfoundry.sh/anvil",
   "description": "Anvil is a fast local Ethereum development node",
   "bin": {
-    "anvil": "./bin.mjs"
+    "arbos-anvil": "./bin.mjs"
   },
   "files": [
     "bin",
     "dist"
   ],
   "scripts": {
-    "postinstall": "TARGET_TOOL=anvil node ./dist/postinstall.mjs"
+    "postinstall": "TARGET_TOOL=arbos-anvil node ./dist/postinstall.mjs"
   },
   "optionalDependencies": {
-    "@foundry-rs/anvil-darwin-arm64": "0.0.0",
-    "@foundry-rs/anvil-darwin-amd64": "0.0.0",
-    "@foundry-rs/anvil-linux-arm64": "0.0.0",
-    "@foundry-rs/anvil-linux-amd64": "0.0.0",
-    "@foundry-rs/anvil-win32-amd64": "0.0.0"
+    "@foundry-rs/arbos-anvil-darwin-arm64": "0.0.0",
+    "@foundry-rs/arbos-anvil-darwin-amd64": "0.0.0",
+    "@foundry-rs/arbos-anvil-linux-arm64": "0.0.0",
+    "@foundry-rs/arbos-anvil-linux-amd64": "0.0.0",
+    "@foundry-rs/arbos-anvil-win32-amd64": "0.0.0"
   },
   "publishConfig": {
     "access": "public",

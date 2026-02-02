@@ -10,6 +10,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+# Disable auto-discovery since we have multiple binaries sharing the same source
+autobins = false
+
 [lints]
 workspace = true
 
@@ -17,8 +20,13 @@ workspace = true
 name = "cast"
 
 [[bin]]
-name = "cast"
+name = "arbos-cast"
 path = "bin/main.rs"
+
+# Alias binary for backwards compatibility and tests
+[[bin]]
+name = "cast"
+path = "bin/cast_alias.rs"
 
 [dependencies]
 # lib

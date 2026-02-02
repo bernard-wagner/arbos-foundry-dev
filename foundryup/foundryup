@@ -15,7 +15,7 @@ FOUNDRY_BIN_PATH="$FOUNDRY_BIN_DIR/foundryup"
 FOUNDRYUP_JOBS=""
 FOUNDRYUP_IGNORE_VERIFICATION=false
 
-BINS=(forge cast anvil chisel)
+BINS=(arbos-forge arbos-cast arbos-anvil arbos-chisel)
 HASH_NAMES=()
 HASH_VALUES=()
 
@@ -162,7 +162,7 @@ main() {
     # If `--force` is set, skip the SHA verification.
     if [ "$FOUNDRYUP_IGNORE_VERIFICATION" = false ]; then
       # Check if the version is already installed by downloading the attestation file.
-      say "checking if forge, cast, anvil, and chisel for $FOUNDRYUP_TAG version are already installed"
+      say "checking if arbos-forge, arbos-cast, arbos-anvil, and arbos-chisel for $FOUNDRYUP_TAG version are already installed"
 
       # Create a temporary directory to store the attestation link and artifact.
       tmp_dir="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
@@ -253,7 +253,7 @@ main() {
     fi
 
     # Download and extract the binaries archive
-    say "downloading forge, cast, anvil, and chisel for $FOUNDRYUP_TAG version"
+    say "downloading arbos-forge, arbos-cast, arbos-anvil, and arbos-chisel for $FOUNDRYUP_TAG version"
     if [ "$PLATFORM" = "win32" ]; then
       tmp="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
       tmp="$tmp/foundry.zip"

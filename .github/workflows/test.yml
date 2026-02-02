@@ -19,6 +19,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
   RUSTC_WRAPPER: "sccache"
+  RUST_MIN_STACK: 4194304 # 2 * the default (2 * 1024 * 1024)   
 
 jobs:
   matrices:
@@ -39,7 +40,7 @@ jobs:
         id: gen
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PROFILE: ${{ inputs.profile }}
+          PROFILE: ${{ inputs.profile || 'default' }}
         shell: bash
         run: |
           output=$(python3 .github/scripts/matrices.py)
@@ -107,6 +108,10 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "<>"
           git config --global url."https://github.com/".insteadOf "git@github.com:"
+      - name: Set git config for long paths
+        if: contains(matrix.runner_label, 'windows')
+        run: |
+          git config --system core.longpaths true
       - name: Test
         env:
           SVM_TARGET_PLATFORM: ${{ matrix.svm_target_platform }}
@@ -114,4 +119,5 @@ jobs:
           WS_ARCHIVE_URLS: ${{ secrets.WS_ARCHIVE_URLS }}
           ETHERSCAN_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
+          RUSTC_WRAPPER: ${{ env.ACT && '' || 'sccache' }}
         run: cargo nextest run ${{ matrix.flags }}

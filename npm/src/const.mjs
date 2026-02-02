@@ -3,12 +3,12 @@ import * as NodePath from 'node:path'
 /**
  * @typedef {'amd64' | 'arm64'} Arch
  * @typedef {'linux' | 'darwin' | 'win32'} Platform
- * @typedef {'forge' | 'cast' | 'anvil' | 'chisel'} Tool
+ * @typedef {'arbos-forge' | 'arbos-cast' | 'arbos-anvil' | 'arbos-chisel'} Tool
  * @typedef {'debug' | 'release' | 'maxperf'} Profile
  */
 
 /** @type {readonly Tool[]} */
-export const KNOWN_TOOLS = Object.freeze(['forge', 'cast', 'anvil', 'chisel'])
+export const KNOWN_TOOLS = Object.freeze(['arbos-forge', 'arbos-cast', 'arbos-anvil', 'arbos-chisel'])
 
 const TOOL_SET = new Set(KNOWN_TOOLS)
 
