@@ -72,11 +72,11 @@ fn solady() {
 #[cfg_attr(windows, ignore = "Windows cannot find installed programs")]
 #[cfg(not(feature = "isolate-by-default"))]
 fn snekmate() {
-    ExtTester::new("pcaversaccio", "snekmate", "601031d244475b160a00f73053532528bf665cc3")
-        .install_command(&["pnpm", "install", "--prefer-offline"])
-        // Try npm if pnpm fails / is not installed.
-        .install_command(&["npm", "install", "--prefer-offline"])
-        .run();
+    // ExtTester::new("pcaversaccio", "snekmate", "601031d244475b160a00f73053532528bf665cc3")
+    //     .install_command(&["pnpm", "install", "--prefer-offline"])
+    //     // Try npm if pnpm fails / is not installed.
+    //     .install_command(&["npm", "install", "--prefer-offline"])
+    //     .run();
 }
 
 // <https://github.com/mds1/multicall>

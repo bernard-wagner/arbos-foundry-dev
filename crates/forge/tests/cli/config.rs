@@ -105,8 +105,6 @@ create2_library_salt = "0x000000000000000000000000000000000000000000000000000000
 create2_deployer = "0x4e59b44847b379578588920ca78fbf26c0b4956c"
 assertions_revert = true
 legacy_assertions = false
-celo = false
-bypass_prevrandao = false
 transaction_timeout = 120
 additional_compiler_profiles = []
 compilation_restrictions = []
@@ -119,6 +117,8 @@ endpoints = "all"
 [[profile.default.fs_permissions]]
 access = "read"
 path = "out"
+
+[profile.default.stylus]
 
 [fmt]
 line_length = 120
@@ -357,6 +357,7 @@ forgetest!(can_extract_config_values, |prj, cmd| {
         additional_compiler_profiles: Default::default(),
         compilation_restrictions: Default::default(),
         script_execution_protection: true,
+        stylus: Default::default(),
         _non_exhaustive: (),
     };
     prj.write_config(input.clone());
@@ -1374,12 +1375,11 @@ forgetest_init!(test_default_config, |prj, cmd| {
   "soldeer": null,
   "assertions_revert": true,
   "legacy_assertions": false,
-  "celo": false,
-  "bypass_prevrandao": false,
   "transaction_timeout": 120,
   "additional_compiler_profiles": [],
   "compilation_restrictions": [],
-  "script_execution_protection": true
+  "script_execution_protection": true,
+  "stylus": {}
 }
 
 "#]]);

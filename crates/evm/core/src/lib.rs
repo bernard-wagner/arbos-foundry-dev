@@ -5,8 +5,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::constants::DEFAULT_CREATE2_DEPLOYER;
-use alloy_evm::eth::EthEvmContext;
+use crate::{constants::DEFAULT_CREATE2_DEPLOYER, evm::EthEvmContext};
 use alloy_primitives::{Address, map::HashMap};
 use auto_impl::auto_impl;
 use backend::DatabaseExt;
@@ -33,7 +32,6 @@ pub mod buffer;
 pub mod bytecode;
 pub mod constants;
 pub mod decode;
-pub mod either_evm;
 pub mod evm;
 pub mod fork;
 pub mod ic;

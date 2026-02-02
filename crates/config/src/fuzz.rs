@@ -70,6 +70,11 @@ pub struct FuzzDictionaryConfig {
     pub include_storage: bool,
     /// The flag indicating whether to include push bytes values
     pub include_push_bytes: bool,
+    /// The flag indicating whether to exclude ArbOS internal state from the dictionary.
+    /// When true, the ArbOS state address and related system addresses are skipped
+    /// during dictionary seeding and runtime collection.
+    #[serde(default = "crate::default_true", skip_serializing_if = "Clone::clone")]
+    pub exclude_arbos_state: bool,
     /// How many addresses to record at most.
     /// Once the fuzzer exceeds this limit, it will start evicting random entries
     ///
@@ -95,6 +100,7 @@ impl Default for FuzzDictionaryConfig {
             dictionary_weight: 40,
             include_storage: true,
             include_push_bytes: true,
+            exclude_arbos_state: true,
             max_fuzz_dictionary_addresses: 300 * MB / 20,
             max_fuzz_dictionary_values: 300 * MB / 32,
             max_fuzz_dictionary_literals: 200 * MB / 32,

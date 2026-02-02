@@ -27,6 +27,7 @@ use crate::{
         pool::transactions::PoolTransaction,
         sign::build_typed_transaction,
     },
+    evm::AnvilEvm,
     mem::{
         inspector::AnvilInspector,
         storage::{BlockchainStorage, InMemoryBlockStates, MinedBlockOutcome},
@@ -41,21 +42,18 @@ use alloy_consensus::{
 };
 use alloy_eip5792::{Capabilities, DelegationCapability};
 use alloy_eips::{
-    Encodable2718,
     eip1559::BaseFeeParams,
     eip4844::{BlobTransactionSidecar, kzg_to_versioned_hash},
     eip7840::BlobParams,
     eip7910::SystemContract,
 };
 use alloy_evm::{
-    Database, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
+    Database, FromRecoveredTx,
     overrides::{OverrideBlockHashes, apply_state_overrides},
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile},
 };
 use alloy_network::{
-    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, AnyTxType,
-    EthereumWallet, UnknownTxEnvelope, UnknownTypedTransaction,
+    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
 use alloy_primitives::{
     Address, B256, Bytes, TxHash, TxKind, U64, U256, address, hex, keccak256, logs_bloom,
@@ -79,7 +77,7 @@ use alloy_rpc_types::{
         parity::LocalizedTransactionTrace,
     },
 };
-use alloy_serde::{OtherFields, WithOtherFields};
+use alloy_serde::WithOtherFields;
 use alloy_signer::Signature;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_trie::{HashBuilder, Nibbles, proof::ProofRetainer};
@@ -87,19 +85,26 @@ use anvil_core::eth::{
     block::{Block, BlockInfo},
     transaction::{
         MaybeImpersonatedTransaction, PendingTransaction, ReceiptResponse, TransactionInfo,
-        TypedReceipt, TypedReceiptRpc, TypedTransaction, has_optimism_fields,
-        transaction_request_to_typed,
+        TypedReceipt, TypedReceiptRpc, TypedTransaction, transaction_request_to_typed,
     },
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{
+        evm::{BlockEnv, EthEvmContext, PrecompilesMap, TxEnv},
+        precompiles::EC_RECOVER,
+    },
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -109,14 +114,10 @@ use foundry_evm::{
     utils::{get_blob_base_fee_update_fraction, get_blob_base_fee_update_fraction_by_spec_id},
 };
 use futures::channel::mpsc::{UnboundedSender, unbounded};
-use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
-use op_revm::{
-    OpContext, OpHaltReason, OpTransaction, transaction::deposit::DepositTransactionParts,
-};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv},
+    DatabaseCommit, Inspector, Journal,
+    context::{Block as RevmBlock, Cfg, JournalTr, TxEnv as BaseTxEnv, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
@@ -190,7 +191,7 @@ impl BlockRequest {
 pub struct Backend {
     /// Access to [`revm::Database`] abstraction.
     ///
-    /// This will be used in combination with [`alloy_evm::Evm`] and is responsible for feeding
+    /// This will be used in combination with the EVM and is responsible for feeding
     /// data to the evm during its execution.
     ///
     /// At time of writing, there are two different types of `Db`:
@@ -198,7 +199,7 @@ pub struct Backend {
     ///   - [`ForkDb`](crate::mem::fork_db::ForkedDatabase): forks off a remote client, missing
     ///     data is retrieved via RPC-calls
     ///
-    /// In order to commit changes to the [`revm::Database`], the [`alloy_evm::Evm`] requires
+    /// In order to commit changes to the [`revm::Database`], the EVM requires
     /// mutable access, which requires a write-lock from this `db`. In forking mode, the time
     /// during which the write-lock is active depends on whether the `ForkDb` can provide all
     /// requested data from memory or whether it has to retrieve it via RPC calls first. This
@@ -452,6 +453,56 @@ impl Backend {
         trace!(target: "backend", "set genesis balances");
 
         Ok(())
+    }
+
+    /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
+    ///
+    /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
+    /// populated from context if state is empty), applies the closure to modify them,
+    /// and only initializes/commits if the params were actually changed.
+    pub async fn apply_arbitrum_state_overrides(&self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let mut db = self.db.write().await;
+
+        let changes = {
+            let env = self.env.read();
+            let mut context = ArbitrumContext {
+                block: env.evm_env.block_env.clone(),
+                tx: TxEnv::default(),
+                cfg: env.evm_env.cfg_env.clone(),
+                journaled_state: Journal::new(&mut **db),
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            // Always use get() which returns current state with defaults populated from context
+            let original_params = state.get().unwrap();
+            let mut params = original_params.clone();
+
+            f(&mut params);
+
+            // Only write to storage if params were actually modified
+            if params != original_params {
+                state.initialize(&params).unwrap();
+                context.journaled_state.finalize()
+            } else {
+                Default::default()
+            }
+        };
+
+        if !changes.is_empty() {
+            let changes = changes
+                .into_iter()
+                .map(|(address, account)| {
+                    let account = account.with_touched_mark();
+                    (address, account)
+                })
+                .collect();
+
+            db.commit(changes);
+        }
     }
 
     /// Sets the account to impersonate
@@ -805,11 +856,6 @@ impl Backend {
         (self.spec_id() as u8) >= (SpecId::PRAGUE as u8)
     }
 
-    /// Returns true if op-stack deposits are active
-    pub fn is_optimism(&self) -> bool {
-        self.env.read().networks.is_optimism()
-    }
-
     /// Returns the precompiles for the current spec.
     pub fn precompiles(&self) -> BTreeMap<String, Address> {
         let spec_id = self.env.read().evm_env.cfg_env.spec;
@@ -892,14 +938,6 @@ impl Backend {
             return Ok(());
         }
         Err(BlockchainError::EIP7702TransactionUnsupportedAtHardfork)
-    }
-
-    /// Returns an error if op-stack deposits are not active
-    pub fn ensure_op_deposits_active(&self) -> Result<(), BlockchainError> {
-        if self.is_optimism() {
-            return Ok(());
-        }
-        Err(BlockchainError::DepositTransactionUnsupported)
     }
 
     /// Returns the block gas limit
@@ -1180,11 +1218,10 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
     where
         DB: DatabaseRef + ?Sized,
-        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>
-            + Inspector<OpContext<WrapDatabaseRef<&'db DB>>>,
+        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
         WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
     {
         let mut evm = new_evm_with_inspector_ref(db, env, inspector);
@@ -1217,15 +1254,11 @@ impl Backend {
         BlockchainError,
     > {
         let mut env = self.next_env();
-        env.tx = FromRecoveredTx::from_recovered_tx(
+        let base_tx: BaseTxEnv = FromRecoveredTx::from_recovered_tx(
             &tx.pending_transaction.transaction.transaction,
             *tx.pending_transaction.sender(),
         );
-
-        if env.networks.is_optimism() {
-            env.tx.enveloped_tx =
-                Some(alloy_rlp::encode(&tx.pending_transaction.transaction.transaction).into());
-        }
+        env.tx = TxEnv::from(base_tx);
 
         let db = self.db.read().await;
         let mut inspector = self.build_inspector();
@@ -1239,7 +1272,7 @@ impl Backend {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
             ExecutionResult::Halt { reason, gas_used } => {
-                let eth_reason = op_haltreason_to_instruction_result(reason);
+                let eth_reason = reason.into();
                 (eth_reason, gas_used, None, None)
             }
         };
@@ -1282,7 +1315,7 @@ impl Backend {
         let executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
-            pending: pool_transactions.into_iter(),
+            pending: pool_transactions.into(),
             block_env: env.evm_env.block_env.clone(),
             cfg_env: env.evm_env.cfg_env,
             parent_hash: storage.best_hash,
@@ -1371,7 +1404,7 @@ impl Backend {
                 let executor = TransactionExecutor {
                     db: &mut **db,
                     validator: self,
-                    pending: pool_transactions.into_iter(),
+                    pending: pool_transactions.into(),
                     block_env: env.evm_env.block_env.clone(),
                     cfg_env: env.evm_env.cfg_env.clone(),
                     parent_hash: best_hash,
@@ -1489,7 +1522,7 @@ impl Backend {
 
         self.fees.set_blob_excess_gas_and_price(BlobExcessGasAndPrice::new(
             next_block_excess_blob_gas,
-            get_blob_base_fee_update_fraction_by_spec_id(*self.env.read().evm_env.spec_id()),
+            get_blob_base_fee_update_fraction_by_spec_id(self.env.read().evm_env.spec_id()),
         ));
 
         // notify all listeners
@@ -1557,10 +1590,9 @@ impl Backend {
                     nonce,
                     sidecar: _,
                     chain_id,
-                    transaction_type,
                     .. // Rest of the gas fees related fields are taken from `fee_details`
                 },
-            other,
+            ..
         } = request;
 
         let FeeDetails {
@@ -1594,7 +1626,7 @@ impl Backend {
         let caller = from.unwrap_or_default();
         let to = to.as_ref().and_then(TxKind::to);
         let blob_hashes = blob_versioned_hashes.unwrap_or_default();
-        let mut base = TxEnv {
+        let mut base = BaseTxEnv {
             caller,
             gas_limit,
             gas_price,
@@ -1621,35 +1653,19 @@ impl Backend {
             ..Default::default()
         };
         base.set_signed_authorization(authorization_list.unwrap_or_default());
-        env.tx = OpTransaction { base, ..Default::default() };
+        env.tx = TxEnv::from(base);
 
         if let Some(nonce) = nonce {
-            env.tx.base.nonce = nonce;
+            env.tx.nonce = nonce;
+        } else {
+            // Disable nonce check in revm
+            env.evm_env.cfg_env.disable_nonce_check = true;
         }
 
         if env.evm_env.block_env.basefee == 0 {
             // this is an edge case because the evm fails if `tx.effective_gas_price < base_fee`
             // 0 is only possible if it's manually set
             env.evm_env.cfg_env.disable_base_fee = true;
-        }
-
-        // Deposit transaction?
-        if transaction_type == Some(DEPOSIT_TX_TYPE_ID) && has_optimism_fields(&other) {
-            let deposit = DepositTransactionParts {
-                source_hash: other
-                    .get_deserialized::<B256>("sourceHash")
-                    .map(|sh| sh.unwrap_or_default())
-                    .unwrap_or_default(),
-                mint: other
-                    .get_deserialized::<u128>("mint")
-                    .map(|m| m.unwrap_or_default())
-                    .or(None),
-                is_system_transaction: other
-                    .get_deserialized::<bool>("isSystemTx")
-                    .map(|st| st.unwrap_or_default())
-                    .unwrap_or_default(),
-            };
-            env.tx.deposit = deposit;
         }
 
         env
@@ -1902,9 +1918,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (op_haltreason_to_instruction_result(reason), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         inspector.print_logs();
@@ -2006,7 +2020,6 @@ impl Backend {
                     }
                     #[cfg(feature = "js-tracer")]
                     GethDebugTracerType::JsTracer(code) => {
-                        use alloy_evm::IntoTxEnv;
                         let config = tracer_config.into_json();
                         let mut inspector =
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
@@ -2018,7 +2031,7 @@ impl Backend {
                         let result = evm.transact(env.tx.clone())?;
                         let res = evm
                             .inspector_mut()
-                            .json_result(result, &env.tx.into_tx_env(), &block, &cache_db)
+                            .json_result(result, &*env.tx, &block, &cache_db)
                             .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
                         Ok(GethTrace::JS(res))
@@ -2042,9 +2055,7 @@ impl Backend {
                 ExecutionResult::Revert { gas_used, output } => {
                     (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
                 }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    (op_haltreason_to_instruction_result(reason), gas_used, None)
-                }
+                ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
             };
 
             drop(evm);
@@ -2083,9 +2094,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (op_haltreason_to_instruction_result(reason), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         let access_list = inspector.access_list();
@@ -2707,11 +2716,9 @@ impl Backend {
         f: F,
     ) -> Result<T, BlockchainError>
     where
-        for<'a> I: Inspector<EthEvmContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>>
-            + Inspector<OpContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>>
-            + 'a,
+        for<'a> I: Inspector<EthEvmContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>> + 'a,
         for<'a> F:
-            FnOnce(ResultAndState<OpHaltReason>, CacheDB<Box<&'a StateDb>>, I, TxEnv, Env) -> T,
+            FnOnce(ResultAndState<HaltReason>, CacheDB<Box<&'a StateDb>>, I, TxEnv, Env) -> T,
     {
         let block = {
             let storage = self.blockchain.storage.read();
@@ -2765,7 +2772,7 @@ impl Backend {
             let executor = TransactionExecutor {
                 db: &mut cache_db,
                 validator: self,
-                pending: pool_txs.into_iter(),
+                pending: pool_txs.into(),
                 block_env: env.evm_env.block_env.clone(),
                 cfg_env: env.evm_env.cfg_env.clone(),
                 parent_hash: block.header.parent_hash,
@@ -2785,13 +2792,11 @@ impl Backend {
 
             let target_tx = block.body.transactions[index].clone();
             let target_tx = PendingTransaction::from_maybe_impersonated(target_tx)?;
-            let mut tx_env: OpTransaction<TxEnv> = FromRecoveredTx::from_recovered_tx(
+            let base_tx: BaseTxEnv = FromRecoveredTx::from_recovered_tx(
                 &target_tx.transaction.transaction,
                 *target_tx.sender(),
             );
-            if env.networks.is_optimism() {
-                tx_env.enveloped_tx = Some(target_tx.transaction.transaction.encoded_2718().into());
-            }
+            let tx_env: TxEnv = TxEnv::from(base_tx);
 
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
 
@@ -2799,7 +2804,7 @@ impl Backend {
                 .transact(tx_env.clone())
                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
-            Ok(f(result, cache_db, inspector, tx_env.base, env))
+            Ok(f(result, cache_db, inspector, tx_env, env))
         };
 
         let read_guard = self.states.upgradable_read();
@@ -2831,12 +2836,7 @@ impl Backend {
             inspector,
             |result, cache_db, mut inspector, tx_env, env| {
                 inspector
-                    .json_result(
-                        result,
-                        &alloy_evm::IntoTxEnv::into_tx_env(tx_env),
-                        &env.evm_env.block_env,
-                        &cache_db,
-                    )
+                    .json_result(result, &*tx_env, &env.evm_env.block_env, &cache_db)
                     .map_err(|e| BlockchainError::Message(e.to_string()))
             },
         )??;
@@ -3138,30 +3138,25 @@ impl Backend {
                 .base_fee_per_gas
                 .map_or(self.base_fee() as u128, |g| g as u128)
                 .saturating_add(t.tx().max_priority_fee_per_gas),
-            TypedTransaction::Deposit(_) => 0_u128,
+            // Arbitrum system transactions have no gas price (or use their own L1-provided gas)
+            TypedTransaction::ArbitrumDeposit(_)
+            | TypedTransaction::ArbitrumRetryable(_)
+            | TypedTransaction::ArbitrumInternal(_) => 0,
         };
 
         let receipts = self.get_receipts(block.body.transactions.iter().map(|tx| tx.hash()));
         let next_log_index = receipts[..index].iter().map(|r| r.logs().len()).sum::<usize>();
 
-        // Build a ReceiptWithBloom<rpc_types::Log> from the typed receipt, handling Deposit
+        // Build a ReceiptWithBloom<rpc_types::Log> from the typed receipt
         // specially
-        let (status, cumulative_gas_used, logs_source, logs_bloom) = match &tx_receipt {
-            TypedReceipt::Deposit(r) => (
-                r.receipt.inner.status,
-                r.receipt.inner.cumulative_gas_used,
-                r.receipt.inner.logs.to_vec(),
-                r.logs_bloom,
-            ),
-            _ => {
-                let receipt_ref = tx_receipt.as_receipt_with_bloom();
-                (
-                    receipt_ref.receipt.status,
-                    receipt_ref.receipt.cumulative_gas_used,
-                    receipt_ref.receipt.logs.to_vec(),
-                    receipt_ref.logs_bloom,
-                )
-            }
+        let (status, cumulative_gas_used, logs_source, logs_bloom) = {
+            let receipt_ref = tx_receipt.as_receipt_with_bloom();
+            (
+                receipt_ref.receipt.status,
+                receipt_ref.receipt.cumulative_gas_used,
+                receipt_ref.receipt.logs.to_vec(),
+                receipt_ref.logs_bloom,
+            )
         };
 
         let receipt: alloy_consensus::Receipt<alloy_rpc_types::Log> = Receipt {
@@ -3190,24 +3185,14 @@ impl Backend {
             TypedReceipt::EIP2930(_) => TypedReceiptRpc::EIP2930(receipt_with_bloom),
             TypedReceipt::EIP4844(_) => TypedReceiptRpc::EIP4844(receipt_with_bloom),
             TypedReceipt::EIP7702(_) => TypedReceiptRpc::EIP7702(receipt_with_bloom),
-            TypedReceipt::Deposit(r) => {
-                TypedReceiptRpc::Deposit(op_alloy_consensus::OpDepositReceiptWithBloom {
-                    receipt: op_alloy_consensus::OpDepositReceipt {
-                        inner: Receipt {
-                            status: receipt_with_bloom.receipt.status,
-                            cumulative_gas_used: receipt_with_bloom.receipt.cumulative_gas_used,
-                            logs: receipt_with_bloom
-                                .receipt
-                                .logs
-                                .into_iter()
-                                .map(|l| l.inner)
-                                .collect(),
-                        },
-                        deposit_nonce: r.receipt.deposit_nonce,
-                        deposit_receipt_version: r.receipt.deposit_receipt_version,
-                    },
-                    logs_bloom: receipt_with_bloom.logs_bloom,
-                })
+            TypedReceipt::ArbitrumDeposit(_) => {
+                TypedReceiptRpc::ArbitrumDeposit(receipt_with_bloom)
+            }
+            TypedReceipt::ArbitrumRetryable(_) => {
+                TypedReceiptRpc::ArbitrumRetryable(receipt_with_bloom)
+            }
+            TypedReceipt::ArbitrumInternal(_) => {
+                TypedReceiptRpc::ArbitrumInternal(receipt_with_bloom)
             }
         };
 
@@ -3680,10 +3665,8 @@ impl TransactionValidator for Backend {
         }
 
         // Nonce validation
-        let is_deposit_tx =
-            matches!(&pending.transaction.transaction, TypedTransaction::Deposit(_));
         let nonce = tx.nonce();
-        if nonce < account.nonce && !is_deposit_tx {
+        if nonce < account.nonce {
             warn!(target: "backend", "[{:?}] nonce too low", tx.hash());
             return Err(InvalidTransactionError::NonceTooLow);
         }
@@ -3747,7 +3730,7 @@ impl TransactionValidator for Backend {
 
             // EIP-1559 fee validation (London hard fork and later).
             if env.evm_env.cfg_env.spec >= SpecId::LONDON {
-                if tx.gas_price() < env.evm_env.block_env.basefee.into() && !is_deposit_tx {
+                if tx.gas_price() < env.evm_env.block_env.basefee.into() {
                     warn!(target: "backend", "max fee per gas={}, too low, block basefee={}",tx.gas_price(),  env.evm_env.block_env.basefee);
                     return Err(InvalidTransactionError::FeeCapTooLow);
                 }
@@ -3777,30 +3760,15 @@ impl TransactionValidator for Backend {
 
             let max_cost = tx.max_cost();
             let value = tx.value();
-            match &tx.transaction {
-                TypedTransaction::Deposit(deposit_tx) => {
-                    // Deposit transactions
-                    // https://specs.optimism.io/protocol/deposits.html#execution
-                    // 1. no gas cost check required since already have prepaid gas from L1
-                    // 2. increment account balance by deposited amount before checking for
-                    //    sufficient funds `tx.value <= existing account value + deposited value`
-                    if value > account.balance + U256::from(deposit_tx.mint) {
-                        warn!(target: "backend", "[{:?}] insufficient balance={}, required={} account={:?}", tx.hash(), account.balance + U256::from(deposit_tx.mint), value, *pending.sender());
-                        return Err(InvalidTransactionError::InsufficientFunds);
-                    }
-                }
-                _ => {
-                    // check sufficient funds: `gas * price + value`
-                    let req_funds =
-                        max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
-                            warn!(target: "backend", "[{:?}] cost too high", tx.hash());
-                            InvalidTransactionError::InsufficientFunds
-                        })?;
-                    if account.balance < U256::from(req_funds) {
-                        warn!(target: "backend", "[{:?}] insufficient allowance={}, required={} account={:?}", tx.hash(), account.balance, req_funds, *pending.sender());
-                        return Err(InvalidTransactionError::InsufficientFunds);
-                    }
-                }
+
+            // check sufficient funds: `gas * price + value`
+            let req_funds = max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
+                warn!(target: "backend", "[{:?}] cost too high", tx.hash());
+                InvalidTransactionError::InsufficientFunds
+            })?;
+            if account.balance < U256::from(req_funds) {
+                warn!(target: "backend", "[{:?}] insufficient allowance={}, required={} account={:?}", tx.hash(), account.balance, req_funds, *pending.sender());
+                return Err(InvalidTransactionError::InsufficientFunds);
             }
         }
         Ok(())
@@ -3828,50 +3796,6 @@ pub fn transaction_build(
     info: Option<TransactionInfo>,
     base_fee: Option<u64>,
 ) -> AnyRpcTransaction {
-    if let TypedTransaction::Deposit(ref deposit_tx) = eth_transaction.transaction {
-        let dep_tx = deposit_tx;
-
-        let ser = serde_json::to_value(dep_tx).expect("could not serialize TxDeposit");
-        let maybe_deposit_fields = OtherFields::try_from(ser);
-
-        match maybe_deposit_fields {
-            Ok(mut fields) => {
-                // Add zeroed signature fields for backwards compatibility
-                // https://specs.optimism.io/protocol/deposits.html#the-deposited-transaction-type
-                fields.insert("v".to_string(), serde_json::to_value("0x0").unwrap());
-                fields.insert("r".to_string(), serde_json::to_value(B256::ZERO).unwrap());
-                fields.insert(String::from("s"), serde_json::to_value(B256::ZERO).unwrap());
-                fields.insert(String::from("nonce"), serde_json::to_value("0x0").unwrap());
-
-                let inner = UnknownTypedTransaction {
-                    ty: AnyTxType(DEPOSIT_TX_TYPE_ID),
-                    fields,
-                    memo: Default::default(),
-                };
-
-                let envelope = AnyTxEnvelope::Unknown(UnknownTxEnvelope {
-                    hash: eth_transaction.hash(),
-                    inner,
-                });
-
-                let tx = Transaction {
-                    inner: Recovered::new_unchecked(envelope, deposit_tx.from),
-                    block_hash: block
-                        .as_ref()
-                        .map(|block| B256::from(keccak256(alloy_rlp::encode(&block.header)))),
-                    block_number: block.as_ref().map(|block| block.header.number),
-                    transaction_index: info.as_ref().map(|info| info.transaction_index),
-                    effective_gas_price: None,
-                };
-
-                return AnyRpcTransaction::from(WithOtherFields::new(tx));
-            }
-            Err(_) => {
-                error!(target: "backend", "failed to serialize deposit transaction");
-            }
-        }
-    }
-
     let transaction = eth_transaction.into_rpc_transaction();
     let effective_gas_price = transaction.effective_gas_price(base_fee);
 
@@ -3959,13 +3883,6 @@ pub fn is_arbitrum(chain_id: u64) -> bool {
         return chain.is_arbitrum();
     }
     false
-}
-
-pub fn op_haltreason_to_instruction_result(op_reason: OpHaltReason) -> InstructionResult {
-    match op_reason {
-        OpHaltReason::Base(eth_h) => eth_h.into(),
-        OpHaltReason::FailedDeposit => InstructionResult::Stop,
-    }
 }
 
 #[cfg(test)]

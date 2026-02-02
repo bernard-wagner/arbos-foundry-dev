@@ -28,7 +28,7 @@ forge-script-sequence.workspace = true
 solar.workspace = true
 
 alloy-dyn-abi.workspace = true
-alloy-evm.workspace = true
+
 alloy-json-abi.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
@@ -67,3 +67,10 @@ tracing.workspace = true
 walkdir.workspace = true
 proptest.workspace = true
 serde.workspace = true
+
+arbos-revm.workspace = true
+stylus = { workspace = true, features = ["cc_brotli"] }
+wasm-encoder.workspace = true
+wasmparser.workspace = true
+wasmprinter.workspace = true
+wasmer.workspace = true

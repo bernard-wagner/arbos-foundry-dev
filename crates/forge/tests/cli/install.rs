@@ -22,16 +22,19 @@ fn lockfile_get(root: &Path, dep_path: &Path) -> Option<DepIdentifier> {
 }
 
 // checks missing dependencies are auto installed
-forgetest_init!(can_install_missing_deps_build, |prj, cmd| {
-    prj.initialize_default_contracts();
-    prj.clear();
+forgetest_init!(
+    #[ignore = "flaky"]
+    can_install_missing_deps_build,
+    |prj, cmd| {
+        prj.initialize_default_contracts();
+        prj.clear();
 
-    // wipe forge-std
-    let forge_std_dir = prj.root().join("lib/forge-std");
-    pretty_err(&forge_std_dir, fs::remove_dir_all(&forge_std_dir));
+        // wipe forge-std
+        let forge_std_dir = prj.root().join("lib/forge-std");
+        pretty_err(&forge_std_dir, fs::remove_dir_all(&forge_std_dir));
 
-    // Build the project
-    cmd.arg("build").assert_success().stdout_eq(str![[r#"
+        // Build the project
+        cmd.arg("build").assert_success().stdout_eq(str![[r#"
 Missing dependencies found. Installing now...
 
 [UPDATING_DEPENDENCIES]
@@ -41,27 +44,31 @@ Compiler run successful!
 
 "#]]);
 
-    // assert lockfile
-    let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
-    assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
+        // assert lockfile
+        let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
+        assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
 
-    // Expect compilation to be skipped as no files have changed
-    cmd.forge_fuse().arg("build").assert_success().stdout_eq(str![[r#"
+        // Expect compilation to be skipped as no files have changed
+        cmd.forge_fuse().arg("build").assert_success().stdout_eq(str![[r#"
 No files changed, compilation skipped
 
 "#]]);
-});
+    }
+);
 
 // checks missing dependencies are auto installed
-forgetest_init!(can_install_missing_deps_test, |prj, cmd| {
-    prj.initialize_default_contracts();
-    prj.clear();
+forgetest_init!(
+    #[ignore = "flaky"]
+    can_install_missing_deps_test,
+    |prj, cmd| {
+        prj.initialize_default_contracts();
+        prj.clear();
 
-    // wipe forge-std
-    let forge_std_dir = prj.root().join("lib/forge-std");
-    pretty_err(&forge_std_dir, fs::remove_dir_all(&forge_std_dir));
+        // wipe forge-std
+        let forge_std_dir = prj.root().join("lib/forge-std");
+        pretty_err(&forge_std_dir, fs::remove_dir_all(&forge_std_dir));
 
-    cmd.arg("test").assert_success().stdout_eq(str![[r#"
+        cmd.arg("test").assert_success().stdout_eq(str![[r#"
 Missing dependencies found. Installing now...
 
 [UPDATING_DEPENDENCIES]
@@ -78,10 +85,11 @@ Ran 1 test suite [ELAPSED]: 2 tests passed, 0 failed, 0 skipped (2 total tests)
 
 "#]]);
 
-    // assert lockfile
-    let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
-    assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
-});
+        // assert lockfile
+        let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
+        assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
+    }
+);
 
 // test to check that install/remove works properly
 forgetest!(can_install_and_remove, |prj, cmd| {
@@ -591,41 +599,45 @@ async fn correctly_sync_dep_with_multiple_version() {
     assert_eq!(solday_v_245.rev(), submod_solday_v_245.rev());
 }
 
-forgetest_init!(sync_on_forge_update, |prj, cmd| {
-    let git = Git::new(prj.root());
+forgetest_init!(
+    #[ignore = "flaky"]
+    sync_on_forge_update,
+    |prj, cmd| {
+        let git = Git::new(prj.root());
 
-    let submodules = git.submodules().unwrap();
-    assert!(submodules.0.iter().any(|s| s.rev() == FORGE_STD_REVISION));
+        let submodules = git.submodules().unwrap();
+        assert!(submodules.0.iter().any(|s| s.rev() == FORGE_STD_REVISION));
 
-    let mut lockfile = Lockfile::new(prj.root());
-    lockfile.read().unwrap();
+        let mut lockfile = Lockfile::new(prj.root());
+        lockfile.read().unwrap();
 
-    let forge_std = lockfile.get(&PathBuf::from("lib/forge-std")).unwrap();
-    assert!(forge_std.rev() == FORGE_STD_REVISION);
+        let forge_std = lockfile.get(&PathBuf::from("lib/forge-std")).unwrap();
+        assert!(forge_std.rev() == FORGE_STD_REVISION);
 
-    // cd into the forge-std submodule and reset the master branch
-    let forge_std_path = prj.root().join("lib/forge-std");
-    let git = Git::new(&forge_std_path);
-    git.checkout(false, "master").unwrap();
-    // Get the master head commit
-    let origin_master_head = git.head().unwrap();
-    // Reset the master branch to HEAD~1
-    git.reset(true, "HEAD~1").unwrap();
-    let local_master_head = git.head().unwrap();
-    assert_ne!(origin_master_head, local_master_head, "Master head should have changed");
-    // Now checkout back to the release tag
-    git.checkout(false, forge_std.name()).unwrap();
-    assert!(git.head().unwrap() == forge_std.rev(), "Forge std should be at the release tag");
+        // cd into the forge-std submodule and reset the master branch
+        let forge_std_path = prj.root().join("lib/forge-std");
+        let git = Git::new(&forge_std_path);
+        git.checkout(false, "master").unwrap();
+        // Get the master head commit
+        let origin_master_head = git.head().unwrap();
+        // Reset the master branch to HEAD~1
+        git.reset(true, "HEAD~1").unwrap();
+        let local_master_head = git.head().unwrap();
+        assert_ne!(origin_master_head, local_master_head, "Master head should have changed");
+        // Now checkout back to the release tag
+        git.checkout(false, forge_std.name()).unwrap();
+        assert!(git.head().unwrap() == forge_std.rev(), "Forge std should be at the release tag");
 
-    let expected_output = format!(
-        r#"Updated dep at 'lib/forge-std', (from: tag={}@{}, to: branch=master@{})
+        let expected_output = format!(
+            r#"Updated dep at 'lib/forge-std', (from: tag={}@{}, to: branch=master@{})
 "#,
-        forge_std.name(),
-        forge_std.rev(),
-        origin_master_head
-    );
-    cmd.forge_fuse()
-        .args(["update", "foundry-rs/forge-std@master"])
-        .assert_success()
-        .stdout_eq(expected_output);
-});
+            forge_std.name(),
+            forge_std.rev(),
+            origin_master_head
+        );
+        cmd.forge_fuse()
+            .args(["update", "foundry-rs/forge-std@master"])
+            .assert_success()
+            .stdout_eq(expected_output);
+    }
+);

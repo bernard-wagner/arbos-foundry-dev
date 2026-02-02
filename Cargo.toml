@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "benches/",
+    "crates/alloy-evm/",
     "crates/anvil/",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
@@ -261,7 +262,6 @@ alloy-transport-http = { version = "1.1.1", default-features = false }
 alloy-transport-ipc = { version = "1.1.1", default-features = false }
 alloy-transport-ws = { version = "1.1.1", default-features = false }
 alloy-hardforks = { version = "0.4.0", default-features = false }
-alloy-op-hardforks = { version = "0.4.0", default-features = false }
 
 ## alloy-core
 alloy-dyn-abi = "1.4.1"
@@ -280,19 +280,22 @@ alloy-chains = "0.2"
 alloy-rlp = "0.3"
 alloy-trie = "0.9"
 
-## op-alloy
-op-alloy-consensus = "0.22.0"
-op-alloy-rpc-types = "0.22.0"
-op-alloy-flz = "0.13.1"
-
-## alloy-evm
-alloy-evm = "0.24.1"
-alloy-op-evm = "0.24.1"
-
-# revm
+## revm
 revm = { version = "33.0.0", default-features = false }
 revm-inspectors = { version = "0.33.0", features = ["serde"] }
-op-revm = { version = "14.0.0", default-features = false }
+
+## alloy-evm
+alloy-evm = { path = "crates/alloy-evm" }
+
+# arbos
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm" , rev = "a48b8f016568c85fa2c05b96886e97dfde1de6f4", default-features = false }
+arbutil = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "b58c678eaa0611b5593c9f9502e35a2e1aa45851", default-features = false }
+stylus = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "b58c678eaa0611b5593c9f9502e35a2e1aa45851", default-features = false }
+wasmer-types = { git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "b58c678eaa0611b5593c9f9502e35a2e1aa45851", default-features = false }
+wasmer = {  git = "https://github.com/iosiro/arbos-foundry-stylus", rev = "b58c678eaa0611b5593c9f9502e35a2e1aa45851", default-features = false }
+wasm-encoder = "0.244.0"
+wasmparser = "0.244.0"
+wasmprinter = "0.244.0"
 
 ## cli
 anstream = "0.6"
@@ -437,11 +440,9 @@ rexpect = { git = "https://github.com/rust-cli/rexpect", rev = "2ed0b1898d7edaf6
 
 ## alloy-evm
 # alloy-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "237d0a0" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "237d0a0" }
 
 ## revm
 revm = { git = "https://github.com/bluealloy/revm.git", rev = "7e59936" }
-op-revm = { git = "https://github.com/bluealloy/revm.git", rev = "7e59936" }
 # revm-inspectors = { git = "https://github.com/zerosnacks/revm-inspectors.git", rev = "0aaab71" }
 
 ## foundry

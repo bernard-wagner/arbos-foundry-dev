@@ -1,11 +1,16 @@
-use crate::{AsEnvMut, Env, EvmEnv, utils::apply_chain_and_block_specific_env_changes};
+use crate::{
+    AsEnvMut, Env, EvmEnv,
+    evm::{BlockEnv, CfgEnv, TxEnv},
+    utils::apply_chain_and_block_specific_env_changes,
+};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
+use foundry_config::stylus::StylusConfig;
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::context::TxEnv as BaseTxEnv;
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.
@@ -20,6 +25,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
     configs: NetworkConfigs,
+    stylus: StylusConfig,
 ) -> eyre::Result<(Env, N::BlockResponse)> {
     trace!(
         %memory_limit,
@@ -62,7 +68,8 @@ pub async fn environment<N: Network, P: Provider<N>>(
         eyre::bail!("failed to get {bn_msg}{latest_msg}");
     };
 
-    let cfg = configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit);
+    let cfg =
+        configure_env(chain_id, memory_limit, disable_block_gas_limit, enable_tx_gas_limit, stylus);
 
     let mut env = Env {
         evm_env: EvmEnv {
@@ -78,13 +85,13 @@ pub async fn environment<N: Network, P: Provider<N>>(
                 ..Default::default()
             },
         },
-        tx: TxEnv {
+        tx: TxEnv::from(BaseTxEnv {
             caller: origin,
             gas_price,
             chain_id: Some(chain_id),
             gas_limit: block.header().gas_limit(),
             ..Default::default()
-        },
+        }),
     };
 
     apply_chain_and_block_specific_env_changes::<N>(env.as_env_mut(), &block, configs);
@@ -105,6 +112,7 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus: StylusConfig,
 ) -> CfgEnv {
     let mut cfg = CfgEnv::default();
     cfg.chain_id = chain_id;
@@ -114,6 +122,7 @@ pub fn configure_env(
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
     cfg.disable_eip3607 = true;
+    cfg.disable_eip3541 = true;
     cfg.disable_block_gas_limit = disable_block_gas_limit;
     cfg.disable_nonce_check = true;
     // By default do not enforce transaction gas limits imposed by Osaka (EIP-7825).
@@ -121,5 +130,14 @@ pub fn configure_env(
     if !enable_tx_gas_limit {
         cfg.tx_gas_limit_cap = Some(u64::MAX);
     }
+
+    // Apply Stylus configuration options
+    if let Some(arbos_version) = stylus.arbos_version {
+        cfg.arbos_version = arbos_version;
+    }
+    cfg.debug_mode = stylus.debug_mode_stylus;
+    cfg.disable_auto_cache = stylus.disable_auto_cache_stylus;
+    cfg.disable_auto_activate = stylus.disable_auto_activate_stylus;
+
     cfg
 }

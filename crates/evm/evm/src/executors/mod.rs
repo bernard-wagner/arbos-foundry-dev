@@ -19,21 +19,27 @@ use alloy_primitives::{
     map::{AddressHashMap, HashMap},
 };
 use alloy_sol_types::{SolCall, sol};
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use foundry_evm_core::{
-    EvmEnv,
     backend::{Backend, BackendError, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
         CALLER, CHEATCODE_ADDRESS, CHEATCODE_CONTRACT_HASH, DEFAULT_CREATE2_DEPLOYER,
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
     },
     decode::{RevertDecoder, SkipReason},
+    evm::{BlockEnv, EvmEnv, TxEnv},
     utils::StateChangeset,
 };
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
+    Journal,
     bytecode::Bytecode,
-    context::{BlockEnv, TxEnv},
+    context::{JournalTr, TxEnv as BaseTxEnv},
     context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,
@@ -321,6 +327,54 @@ impl Executor {
     #[inline]
     pub fn create2_deployer(&self) -> Address {
         self.inspector().create2_deployer
+    }
+
+    /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
+    ///
+    /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
+    /// populated from context if state is empty), applies the closure to modify them,
+    /// and only initializes/commits if the params were actually changed.
+    #[inline]
+    pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let changes = {
+            let mut context = ArbitrumContext {
+                block: self.env.evm_env.block_env.clone(),
+                tx: TxEnv::default(),
+                cfg: self.env.evm_env.cfg_env.clone(),
+                journaled_state: { Journal::new(self.backend.db_mut()) },
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            // Always use get() which returns current state with defaults populated from context
+            let original_params = state.get().unwrap();
+            let mut params = original_params.clone();
+
+            f(&mut params);
+
+            // Only write to storage if params were actually modified
+            if params != original_params {
+                state.initialize(&params).unwrap();
+                context.journaled_state.finalize()
+            } else {
+                Default::default()
+            }
+        };
+
+        if !changes.is_empty() {
+            let changes = changes
+                .into_iter()
+                .map(|(address, account)| {
+                    let account = account.with_touched_mark();
+                    (address, account)
+                })
+                .collect();
+
+            self.backend.commit(changes);
+        }
     }
 
     /// Deploys a contract and commits the new state to the underlying database.
@@ -714,7 +768,7 @@ impl Executor {
                     ..self.env().evm_env.block_env.clone()
                 },
             },
-            tx: TxEnv {
+            tx: TxEnv::from(BaseTxEnv {
                 caller,
                 kind,
                 data,
@@ -724,8 +778,8 @@ impl Executor {
                 gas_priority_fee: None,
                 gas_limit: self.gas_limit,
                 chain_id: Some(self.env().evm_env.cfg_env.chain_id),
-                ..self.env().tx.clone()
-            },
+                ..self.env().tx.base.clone()
+            }),
         }
     }
 

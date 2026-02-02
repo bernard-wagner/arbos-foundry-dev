@@ -20,7 +20,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_network::{AnyNetwork, TransactionResponse};
-use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{BlockNumber, TxHash, U256, hex, map::HashMap, utils::Unit};
 use alloy_provider::Provider;
 use alloy_rpc_types::{Block, BlockNumberOrTag};
@@ -36,20 +35,21 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
     provider::{ProviderBuilder, RetryProvider},
 };
-use foundry_config::Config;
+use foundry_config::{Config, apply_stylus_config, stylus::StylusConfig};
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
-    core::AsEnvMut,
+    core::{
+        AsEnvMut,
+        evm::{BlockEnv, CfgEnv, TxEnv},
+    },
     utils::{apply_chain_and_block_specific_env_changes, get_blob_base_fee_update_fraction},
 };
 use itertools::Itertools;
-use op_revm::OpTransaction;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
 use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
-    context_interface::block::BlobExcessGasAndPrice,
+    context::TxEnv as BaseTxEnv, context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
 };
 use serde_json::{Value, json};
@@ -205,6 +205,8 @@ pub struct NodeConfig {
     pub silent: bool,
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
+    /// Stylus configuration
+    pub stylus_config: StylusConfig,
 }
 
 impl NodeConfig {
@@ -498,6 +500,7 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
+            stylus_config: StylusConfig::default(),
         }
     }
 }
@@ -549,9 +552,6 @@ impl NodeConfig {
     pub fn get_hardfork(&self) -> ChainHardfork {
         if let Some(hardfork) = self.hardfork {
             return hardfork;
-        }
-        if self.networks.is_optimism() {
-            return OpHardfork::default().into();
         }
         EthereumHardfork::default().into()
     }
@@ -1048,6 +1048,12 @@ impl NodeConfig {
         self
     }
 
+    #[must_use]
+    pub fn with_stylus_config(mut self, stylus_config: StylusConfig) -> Self {
+        self.stylus_config = stylus_config;
+        self
+    }
+
     /// Configures everything related to env, backend and database and returns the
     /// [Backend](mem::Backend)
     ///
@@ -1082,10 +1088,7 @@ impl NodeConfig {
                 basefee: self.get_base_fee(),
                 ..Default::default()
             },
-            OpTransaction {
-                base: TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
-                ..Default::default()
-            },
+            TxEnv::from(BaseTxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() }),
             self.networks,
         );
 
@@ -1158,6 +1161,20 @@ impl NodeConfig {
             Arc::new(TokioRwLock::new(self.clone())),
         )
         .await?;
+
+        // Only apply Arbitrum state overrides if stylus config has explicit settings.
+        // This avoids modifying the state trie when no overrides are needed, which is
+        // important for maintaining consistent Merkle proofs in tests.
+        // The get() function in arbos-revm populates defaults from context (chain_id,
+        // block timestamp, etc.) when values are read.
+        if !self.stylus_config.is_default() {
+            let stylus_config = self.stylus_config.clone();
+            backend
+                .apply_arbitrum_state_overrides(|params| {
+                    apply_stylus_config(params, &stylus_config);
+                })
+                .await;
+        }
 
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.
@@ -1355,7 +1372,7 @@ latest block number: {latest_block}"
             // need to update the dev signers and env with the chain id
             self.set_chain_id(Some(chain_id));
             env.evm_env.cfg_env.chain_id = chain_id;
-            env.tx.base.chain_id = chain_id.into();
+            env.tx.chain_id = chain_id.into();
             chain_id
         };
         let override_chain_id = self.chain_id;

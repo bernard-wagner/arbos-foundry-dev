@@ -8,7 +8,7 @@
 #[macro_use]
 extern crate tracing;
 
-use crate::cache::StorageCachingConfig;
+use crate::{cache::StorageCachingConfig, stylus::StylusConfig};
 use alloy_primitives::{Address, B256, FixedBytes, U256, address, map::AddressHashMap};
 use eyre::{ContextCompat, WrapErr};
 use figment::{
@@ -39,6 +39,7 @@ use foundry_compilers::{
     multi::{MultiCompilerParser, MultiCompilerRestrictions},
     solc::{CliSettings, SolcLanguage, SolcSettings},
 };
+use foundry_evm_networks::NetworkConfigs;
 use regex::Regex;
 use revm::primitives::hardfork::SpecId;
 use semver::Version;
@@ -128,7 +129,8 @@ pub use compilation::{CompilationRestrictions, SettingsOverrides};
 pub mod extend;
 use extend::Extends;
 
-use foundry_evm_networks::NetworkConfigs;
+pub mod stylus;
+
 pub use semver;
 
 /// Foundry configuration
@@ -552,6 +554,10 @@ pub struct Config {
 
     /// Whether to enable script execution protection.
     pub script_execution_protection: bool,
+
+    /// Configuration for Stylus programs.
+    #[serde(default)]
+    pub stylus: StylusConfig,
 
     /// PRIVATE: This structure may grow, As such, constructing this structure should
     /// _always_ be done using a public constructor or update syntax:
@@ -2583,6 +2589,7 @@ impl Default for Config {
             additional_compiler_profiles: Default::default(),
             compilation_restrictions: Default::default(),
             script_execution_protection: true,
+            stylus: Default::default(),
             _non_exhaustive: (),
         }
     }

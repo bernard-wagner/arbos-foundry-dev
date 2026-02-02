@@ -5,54 +5,84 @@ use crate::{
             cheats::{CheatEcrecover, CheatsManager},
             db::Db,
             env::Env,
-            mem::op_haltreason_to_instruction_result,
             validate::TransactionValidator,
         },
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
     },
+    evm::AnvilEvm,
     mem::inspector::AnvilInspector,
 };
 use alloy_consensus::{
-    Header, Receipt, ReceiptWithBloom, constants::EMPTY_WITHDRAWALS,
+    Header, Receipt, ReceiptWithBloom, Signed, TxLegacy, constants::EMPTY_WITHDRAWALS,
     proofs::calculate_receipt_root, transaction::Either,
 };
 use alloy_eips::{
+    eip2718::Encodable2718,
     eip7685::EMPTY_REQUESTS_HASH,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     eip7840::BlobParams,
 };
 use alloy_evm::{
-    EthEvm, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    FromRecoveredTx,
+    precompiles::{DynPrecompile, Precompile},
 };
-use alloy_op_evm::OpEvm;
-use alloy_primitives::{B256, Bloom, BloomInput, Log};
+use alloy_primitives::{
+    Address, B256, Bloom, BloomInput, Bytes, Log, Signature, TxKind, U256, address,
+};
+use alloy_sol_types::{SolEvent, sol};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
+use arbos_revm::{
+    ArbitrumEvm,
+    precompiles::ArbitrumPrecompileProvider,
+    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
+    transaction::ArbitrumTransaction,
+};
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{
+        evm::{BlockEnv, CfgEnv, EthEvmContext, LocalContext, PrecompilesMap},
+        precompiles::EC_RECOVER,
+    },
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
-use op_revm::{L1BlockInfo, OpContext, OpTransaction, precompiles::OpPrecompiles};
 use revm::{
     Database, DatabaseRef, Inspector, Journal,
-    context::{
-        Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv,
-    },
+    context::{Block as RevmBlock, Cfg, JournalTr, TxEnv},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
-use std::{fmt::Debug, sync::Arc};
+use std::{collections::VecDeque, fmt::Debug, sync::Arc};
+
+const ARB_RETRYABLE_TX_ADDRESS: Address = address!("0x000000000000000000000000000000000000006e");
+const MIN_RETRYABLE_GAS: u64 = 21_000;
+
+sol! {
+    event RedeemScheduled(
+        bytes32 indexed ticketId,
+        bytes32 indexed retryTxHash,
+        uint64 indexed sequenceNum,
+        uint64 donatedGas,
+        address gasDonor,
+        uint256 maxRefund,
+        uint256 submissionFeeRefund
+    );
+}
+
+#[derive(Debug)]
+struct RetryableTxInfo {
+    from: Address,
+    to: Address,
+    call_value: U256,
+    calldata: Bytes,
+}
 
 /// Represents an executed transaction (transacted on the DB)
 #[derive(Debug)]
@@ -89,15 +119,14 @@ impl ExecutedTransaction {
             TypedTransaction::EIP1559(_) => TypedReceipt::EIP1559(receipt_with_bloom),
             TypedTransaction::EIP4844(_) => TypedReceipt::EIP4844(receipt_with_bloom),
             TypedTransaction::EIP7702(_) => TypedReceipt::EIP7702(receipt_with_bloom),
-            TypedTransaction::Deposit(_tx) => {
-                TypedReceipt::Deposit(op_alloy_consensus::OpDepositReceiptWithBloom {
-                    receipt: op_alloy_consensus::OpDepositReceipt {
-                        inner: receipt_with_bloom.receipt,
-                        deposit_nonce: Some(0),
-                        deposit_receipt_version: Some(1),
-                    },
-                    logs_bloom: receipt_with_bloom.logs_bloom,
-                })
+            TypedTransaction::ArbitrumDeposit(_) => {
+                TypedReceipt::ArbitrumDeposit(receipt_with_bloom)
+            }
+            TypedTransaction::ArbitrumRetryable(_) => {
+                TypedReceipt::ArbitrumRetryable(receipt_with_bloom)
+            }
+            TypedTransaction::ArbitrumInternal(_) => {
+                TypedReceipt::ArbitrumInternal(receipt_with_bloom)
             }
         }
     }
@@ -122,7 +151,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     /// type used to validate before inclusion
     pub validator: &'a V,
     /// all pending transactions
-    pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
+    pub pending: VecDeque<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
     pub cfg_env: CfgEnv,
@@ -172,7 +201,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         let excess_blob_gas = if is_cancun { self.block_env.blob_excess_gas() } else { None };
         let mut cumulative_blob_gas_used = if is_cancun { Some(0u64) } else { None };
 
-        for tx in self.into_iter() {
+        while let Some(tx) = (&mut self).next() {
             let tx = match tx {
                 TransactionExecutionOutcome::Executed(tx) => {
                     included.push(tx.transaction.clone());
@@ -217,6 +246,14 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
 
             let ExecutedTransaction { transaction, logs, out, traces, exit_reason: exit, .. } = tx;
             build_logs_bloom(&logs, &mut bloom);
+
+            // Check for scheduled retryable transactions
+            let retryables = self.retryable_transactions_from_logs(&logs);
+            if !retryables.is_empty() {
+                for retryable in retryables.into_iter().rev() {
+                    self.pending.push_front(retryable);
+                }
+            }
 
             let contract_address = out.as_ref().and_then(|out| {
                 if let Output::Create(_, contract_address) = out {
@@ -278,7 +315,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
     }
 
     fn env_for(&self, tx: &PendingTransaction) -> Env {
-        let mut tx_env: OpTransaction<TxEnv> =
+        let mut base_tx_env: TxEnv =
             FromRecoveredTx::from_recovered_tx(&tx.transaction.transaction, *tx.sender());
 
         if let TypedTransaction::EIP7702(tx_7702) = &tx.transaction.transaction
@@ -289,7 +326,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
                 .tx()
                 .authorization_list
                 .iter()
-                .zip(tx_env.base.authorization_list)
+                .zip(base_tx_env.authorization_list)
                 .map(|(signed_auth, either_auth)| {
                     either_auth.right_and_then(|recovered_auth| {
                         if recovered_auth.authority().is_none()
@@ -307,15 +344,121 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
                     })
                 })
                 .collect();
-            tx_env.base.authorization_list = cheated_auths;
+            base_tx_env.authorization_list = cheated_auths;
         }
 
-        if self.networks.is_optimism() {
-            tx_env.enveloped_tx = Some(alloy_rlp::encode(&tx.transaction.transaction).into());
-        }
+        // Encode the transaction for L1 fee calculation and create ArbitrumTransaction
+        let enveloped_tx = tx.transaction.transaction.encoded_2718();
+        let tx_env = ArbitrumTransaction::new_with_enveloped(base_tx_env, enveloped_tx.into());
 
         Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
     }
+
+    fn retryable_transactions_from_logs(&mut self, logs: &[Log]) -> Vec<Arc<PoolTransaction>> {
+        let mut retryables = Vec::new();
+        for log in logs {
+            let Some((ticket_id, donated_gas)) = self.retryable_schedule_from_log(log) else {
+                continue;
+            };
+            if let Some(tx) = self.retryable_transaction_from_ticket(ticket_id, donated_gas) {
+                retryables.push(tx);
+            }
+        }
+        retryables
+    }
+
+    fn retryable_schedule_from_log(&self, log: &Log) -> Option<(B256, u64)> {
+        if log.address != ARB_RETRYABLE_TX_ADDRESS {
+            return None;
+        }
+
+        let topics = log.topics();
+        if topics.first()? != &RedeemScheduled::SIGNATURE_HASH {
+            return None;
+        }
+
+        let ticket_id = *topics.get(1)?;
+        let donated_gas = donated_gas_from_log(log)?;
+
+        Some((ticket_id, donated_gas))
+    }
+
+    fn retryable_transaction_from_ticket(
+        &mut self,
+        ticket_id: B256,
+        donated_gas: u64,
+    ) -> Option<Arc<PoolTransaction>> {
+        if donated_gas == 0 {
+            return None;
+        }
+
+        let retryable = self.load_retryable_info(ticket_id)?;
+
+        let account = match self.db.basic(retryable.from) {
+            Ok(account) => account.unwrap_or_default(),
+            Err(err) => {
+                trace!(target: "backend", ?ticket_id, ?err, "Failed to load retryable sender");
+                return None;
+            }
+        };
+
+        let gas_limit = donated_gas.max(MIN_RETRYABLE_GAS);
+        let gas_price = if self.cfg_env.spec.is_enabled_in(SpecId::LONDON) {
+            self.block_env.basefee as u128
+        } else {
+            0
+        };
+
+        let tx = TxLegacy {
+            chain_id: None,
+            nonce: account.nonce,
+            gas_price,
+            gas_limit,
+            to: TxKind::Call(retryable.to),
+            value: retryable.call_value,
+            input: retryable.calldata,
+        };
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        let signed = Signed::new_unchecked(tx, signature, B256::ZERO);
+        let typed = TypedTransaction::Legacy(signed);
+        let pending = PendingTransaction::with_impersonated(typed, retryable.from);
+
+        Some(Arc::new(PoolTransaction::new(pending)))
+    }
+
+    fn load_retryable_info(&mut self, ticket_id: B256) -> Option<RetryableTxInfo> {
+        let mut journal = Journal::new(WrapDatabaseRef(&*self.db));
+        journal.set_spec_id(self.cfg_env.spec);
+        let mut context = EthEvmContext {
+            journaled_state: journal,
+            block: self.block_env.clone(),
+            cfg: self.cfg_env.clone(),
+            tx: TxEnv::default().into(),
+            chain: (),
+            local: LocalContext::default(),
+            error: Ok(()),
+        };
+
+        let mut arb_state = context.arb_state(None, true);
+        let mut retryable = arb_state.retryable(ticket_id);
+
+        let from = retryable.from().get().ok()?;
+        let to = retryable.to().get().ok()?;
+        let call_value = retryable.callvalue().get().ok()?;
+        let calldata = retryable.calldata().get().ok()?.into();
+
+        Some(RetryableTxInfo { from, to, call_value, calldata })
+    }
+}
+
+fn donated_gas_from_log(log: &Log) -> Option<u64> {
+    let data = log.data.data.as_ref();
+    if data.len() < 32 {
+        return None;
+    }
+    let mut donated_bytes = [0u8; 8];
+    donated_bytes.copy_from_slice(&data[24..32]);
+    Some(u64::from_be_bytes(donated_bytes))
 }
 
 /// Represents the result of a single transaction execution attempt
@@ -339,7 +482,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
     type Item = TransactionExecutionOutcome;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let transaction = self.pending.next()?;
+        let transaction = self.pending.pop_front()?;
         let sender = *transaction.pending_transaction.sender();
         let account = match self.db.basic(sender).map(|acc| acc.unwrap_or_default()) {
             Ok(account) => account,
@@ -348,7 +491,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
         let env = self.env_for(&transaction.pending_transaction);
 
         // check that we comply with the block's gas limit, if not disabled
-        let max_block_gas = self.gas_used.saturating_add(env.tx.base.gas_limit);
+        let max_block_gas = self.gas_used.saturating_add(env.tx.gas_limit);
         if !env.evm_env.cfg_env.disable_block_gas_limit
             && max_block_gas > env.evm_env.block_env.gas_limit
         {
@@ -452,9 +595,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (op_haltreason_to_instruction_result(reason), gas_used, None, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None, None),
         };
 
         if exit_reason == InstructionResult::OutOfGas {
@@ -503,71 +644,32 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> EitherEvm<DB, I, PrecompilesMap>
+) -> AnvilEvm<DB, I, PrecompilesMap<DB>>
 where
     DB: Database<Error = DatabaseError> + Debug,
-    I: Inspector<EthEvmContext<DB>> + Inspector<OpContext<DB>>,
+    I: Inspector<EthEvmContext<DB>>,
 {
-    if env.networks.is_optimism() {
-        let op_cfg = env.evm_env.cfg_env.clone().with_spec(op_revm::OpSpecId::ISTHMUS);
-        let op_context = OpContext {
-            journaled_state: {
-                let mut journal = Journal::new(db);
-                // Converting SpecId into OpSpecId
-                journal.set_spec_id(env.evm_env.cfg_env.spec);
-                journal
-            },
-            block: env.evm_env.block_env.clone(),
-            cfg: op_cfg.clone(),
-            tx: env.tx.clone(),
-            chain: L1BlockInfo::default(),
-            local: LocalContext::default(),
-            error: Ok(()),
-        };
+    let spec = env.evm_env.cfg_env.spec;
+    let eth_context = EthEvmContext {
+        journaled_state: {
+            let mut journal = Journal::new(db);
+            journal.set_spec_id(spec);
+            journal
+        },
+        block: env.evm_env.block_env.clone(),
+        cfg: env.evm_env.cfg_env.clone(),
+        tx: env.tx.clone(),
+        chain: (),
+        local: LocalContext::default(),
+        error: Ok(()),
+    };
 
-        let op_precompiles = OpPrecompiles::new_with_spec(op_cfg.spec).precompiles();
-        let op_evm = op_revm::OpEvm(RevmEvm::new_with_inspector(
-            op_context,
-            inspector,
-            EthInstructions::default(),
-            PrecompilesMap::from_static(op_precompiles),
-        ));
-
-        let op = OpEvm::new(op_evm, true);
-
-        EitherEvm::Op(op)
-    } else {
-        let spec = env.evm_env.cfg_env.spec;
-        let eth_context = EthEvmContext {
-            journaled_state: {
-                let mut journal = Journal::new(db);
-                journal.set_spec_id(spec);
-                journal
-            },
-            block: env.evm_env.block_env.clone(),
-            cfg: env.evm_env.cfg_env.clone(),
-            tx: env.tx.base.clone(),
-            chain: (),
-            local: LocalContext::default(),
-            error: Ok(()),
-        };
-
-        let eth_precompiles = EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }
-        .precompiles;
-        let eth_evm = RevmEvm::new_with_inspector(
-            eth_context,
-            inspector,
-            EthInstructions::default(),
-            PrecompilesMap::from_static(eth_precompiles),
-        );
-
-        let eth = EthEvm::new(eth_evm, true);
-
-        EitherEvm::Eth(eth)
-    }
+    AnvilEvm(ArbitrumEvm::new_with_inspector(
+        eth_context,
+        inspector,
+        EthInstructions::default(),
+        PrecompilesMap::new(ArbitrumPrecompileProvider::new(spec)),
+    ))
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -575,11 +677,10 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
-    I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>
-        + Inspector<OpContext<WrapDatabaseRef<&'db DB>>>,
+    I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
     WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
 {
     new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)

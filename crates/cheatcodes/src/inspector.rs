@@ -21,7 +21,6 @@ use crate::{
     utils::IgnoredTraces,
 };
 use alloy_consensus::BlobTransactionSidecar;
-use alloy_evm::eth::EthEvmContext;
 use alloy_network::TransactionBuilder4844;
 use alloy_primitives::{
     Address, B256, Bytes, Log, TxKind, U256, hex,
@@ -41,7 +40,7 @@ use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    evm::{FoundryEvm, new_evm_with_existing_context},
+    evm::{BlockEnv, EthEvmContext, FoundryEvm, LocalContext, new_evm_with_existing_context},
 };
 use foundry_evm_traces::{
     TracingInspector, TracingInspectorConfig, identifier::SignaturesIdentifier,
@@ -53,7 +52,7 @@ use rand::Rng;
 use revm::{
     Inspector, Journal,
     bytecode::opcode as op,
-    context::{BlockEnv, JournalTr, LocalContext, TransactionType, result::EVMError},
+    context::{JournalTr, TransactionType, result::EVMError},
     context_interface::{CreateScheme, transaction::SignedAuthorization},
     handler::FrameResult,
     interpreter::{
@@ -113,6 +112,28 @@ pub trait CheatcodesExecutor {
         })
     }
 
+    /// Obtains [FoundryEvm] instance and executes the given CALL frame.
+    fn exec_call(
+        &mut self,
+        inputs: CallInputs,
+        ccx: &mut CheatsCtxt,
+    ) -> Result<CallOutcome, EVMError<DatabaseError>> {
+        with_evm(self, ccx, |evm| {
+            evm.journaled_state.depth += 1;
+
+            let frame = FrameInput::Call(Box::new(inputs));
+
+            let outcome = match evm.run_execution(frame)? {
+                FrameResult::Create(_) => unreachable!(),
+                FrameResult::Call(call) => call,
+            };
+
+            evm.journaled_state.depth -= 1;
+
+            Ok(outcome)
+        })
+    }
+
     fn console_log(&mut self, ccx: &mut CheatsCtxt, msg: &str) {
         self.get_inspector(ccx.state).console_log(msg);
     }
@@ -155,12 +176,11 @@ where
 
     let res = f(&mut evm)?;
 
-    let ctx = evm.into_context();
-    ccx.ecx.journaled_state.inner = ctx.journaled_state.inner;
-    ccx.ecx.block = ctx.block;
-    ccx.ecx.tx = ctx.tx;
-    ccx.ecx.cfg = ctx.cfg;
-    ccx.ecx.error = ctx.error;
+    ccx.ecx.journaled_state.inner = evm.inner.0.ctx.journaled_state.inner.clone();
+    ccx.ecx.block = evm.inner.0.ctx.block.clone();
+    ccx.ecx.tx = evm.inner.0.ctx.tx.clone();
+    ccx.ecx.cfg = evm.inner.0.ctx.cfg.clone();
+    ccx.ecx.error = std::mem::replace(&mut evm.inner.0.ctx.error, Ok(()));
 
     Ok(res)
 }
