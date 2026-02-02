@@ -160,6 +160,8 @@ jobs:
           # Rust expects the compiler to be named <arch>-linux-musl-gcc
           arch="${TARGET%%-*}"
           sudo ln -s /usr/bin/musl-gcc /usr/local/bin/${arch}-linux-musl-gcc
+          # Create symlink for arch-specific asm headers (asm/types.h, etc.)
+          sudo ln -s /usr/include/${arch}-linux-gnu/asm /usr/include/asm
           # Ensure musl compiler can find Linux kernel headers (linux/magic.h, etc.)
           printf 'C_INCLUDE_PATH=/usr/include\n' >> "$GITHUB_ENV"
 
