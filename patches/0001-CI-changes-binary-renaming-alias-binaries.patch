@@ -1,0 +1,1158 @@
+From 9de03c8091d1ecd39c8fe1a1e54a62251d80be03 Mon Sep 17 00:00:00 2001
+From: sysadmin <sysadmin@localhost>
+Date: Mon, 2 Feb 2026 11:41:59 +0000
+Subject: [PATCH 1/2] CI changes, binary renaming, alias binaries
+
+- Rename binaries to arbos-* prefix (arbos-forge, arbos-cast, arbos-anvil, arbos-chisel)
+- Add alias binaries for backwards compatibility (forge, cast, anvil, chisel)
+- Add autobins = false to prevent cargo from auto-discovering binaries
+- Update CI workflows for arbos-foundry
+- Add release-debug workflow
+- Update npm packages for arbos-foundry
+- Update foundryup script for arbos-foundry
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+---
+ .github/scripts/matrices.py         |   8 +-
+ .github/workflows/ci.yml            |  61 ++------
+ .github/workflows/docs.yml          |   4 +-
+ .github/workflows/release-debug.yml | 232 ++++++++++++++++++++++++++++
+ .github/workflows/release.yml       |  97 ++++--------
+ .github/workflows/test-isolate.yml  |   2 -
+ .github/workflows/test.yml          |   8 +-
+ crates/anvil/Cargo.toml             |  11 +-
+ crates/anvil/bin/anvil_alias.rs     |  14 ++
+ crates/cast/Cargo.toml              |  10 +-
+ crates/cast/bin/cast_alias.rs       |  14 ++
+ crates/chisel/Cargo.toml            |  10 +-
+ crates/chisel/bin/chisel_alias.rs   |  14 ++
+ crates/forge/Cargo.toml             |  10 +-
+ crates/forge/bin/forge_alias.rs     |  14 ++
+ foundryup/foundryup                 |   6 +-
+ npm/@foundry-rs/anvil/package.json  |  14 +-
+ npm/@foundry-rs/cast/package.json   |  14 +-
+ npm/@foundry-rs/chisel/package.json |  14 +-
+ npm/@foundry-rs/forge/package.json  |  14 +-
+ npm/scripts/prepublish.mjs          |   8 +-
+ npm/src/const.mjs                   |   4 +-
+ npm/src/generate-package-json.mjs   |   8 +-
+ 23 files changed, 421 insertions(+), 170 deletions(-)
+ create mode 100644 .github/workflows/release-debug.yml
+ create mode 100644 crates/anvil/bin/anvil_alias.rs
+ create mode 100644 crates/cast/bin/cast_alias.rs
+ create mode 100644 crates/chisel/bin/chisel_alias.rs
+ create mode 100644 crates/forge/bin/forge_alias.rs
+
+diff --git a/.github/scripts/matrices.py b/.github/scripts/matrices.py
+index b60ea7048..6b2b37aff 100755
+--- a/.github/scripts/matrices.py
++++ b/.github/scripts/matrices.py
+@@ -68,13 +68,13 @@ class Expanded:
+ profile = os.environ.get("PROFILE")
+ is_pr = os.environ.get("EVENT_NAME") == "pull_request"
+ t_linux_x86 = Target(
+-    "depot-ubuntu-latest-16", "x86_64-unknown-linux-gnu", "linux-amd64"
++    "ubuntu-latest", "x86_64-unknown-linux-gnu", "linux-amd64"
+ )
+ t_linux_arm = Target(
+-    "depot-ubuntu-latest-arm-16", "aarch64-unknown-linux-gnu", "linux-aarch64"
++    "ubuntu-24.04-arm", "aarch64-unknown-linux-gnu", "linux-aarch64"
+ )
+-t_macos = Target("depot-macos-latest", "aarch64-apple-darwin", "macosx-aarch64")
+-t_windows = Target("depot-windows-latest-16", "x86_64-pc-windows-msvc", "windows-amd64")
++t_macos = Target("macos-latest", "aarch64-apple-darwin", "macosx-aarch64")
++t_windows = Target("windows-latest", "x86_64-pc-windows-msvc", "windows-amd64")
+ targets = [t_linux_x86] if is_pr else [t_linux_x86, t_linux_arm, t_macos, t_windows]
+ 
+ config = [
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f622bc27f..66f7e06b7 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -5,6 +5,7 @@ permissions: {}
+ on:
+   pull_request:
+   merge_group:
++  workflow_dispatch:
+ 
+ concurrency:
+   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+@@ -24,16 +25,8 @@ jobs:
+       profile: default
+     secrets: inherit
+ 
+-  docs:
+-    uses: ./.github/workflows/docs.yml
+-    permissions:
+-      contents: read
+-      pages: write
+-      id-token: write
+-    secrets: inherit
+-
+   doctest:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -50,7 +43,7 @@ jobs:
+       - run: cargo test --workspace --doc
+ 
+   typos:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -61,7 +54,7 @@ jobs:
+       - uses: crate-ci/typos@07d900b8fa1097806b8adb6391b0d3e0ac2fdea7 # v1
+ 
+   clippy:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -71,7 +64,7 @@ jobs:
+           persist-credentials: false
+       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+         with:
+-          toolchain: nightly
++          toolchain: nightly-2025-12-19
+           components: clippy
+       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+@@ -81,7 +74,7 @@ jobs:
+           RUSTFLAGS: -Dwarnings
+ 
+   rustfmt:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -91,12 +84,12 @@ jobs:
+           persist-credentials: false
+       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+         with:
+-          toolchain: nightly
++          toolchain: nightly-2025-12-19
+           components: rustfmt
+       - run: cargo fmt --all --check
+ 
+   forge-fmt:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -115,7 +108,7 @@ jobs:
+         run: ./.github/scripts/format.sh --check
+ 
+   crate-checks:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -134,54 +127,18 @@ jobs:
+       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2
+       - run: cargo hack check
+ 
+-  deny:
+-    uses: ithacaxyz/ci/.github/workflows/deny.yml@9c8d0dc20e7ad02455d3fdab2378a05f29907630 # main
+-    permissions:
+-      contents: read
+-
+-  codeql:
+-    name: analyze (${{ matrix.language }})
+-    runs-on: ubuntu-latest
+-    permissions:
+-      security-events: write
+-      actions: read
+-      contents: read
+-    strategy:
+-      fail-fast: false
+-      matrix:
+-        include:
+-          - language: actions
+-            build-mode: none
+-    steps:
+-      - name: Checkout repository
+-        uses: actions/checkout@v5
+-        with:
+-          persist-credentials: false
+-      - name: Initialize CodeQL
+-        uses: github/codeql-action/init@v4
+-        with:
+-          languages: ${{ matrix.language }}
+-          build-mode: ${{ matrix.build-mode }}
+-      - name: Perform CodeQL Analysis
+-        uses: github/codeql-action/analyze@v4
+-        with:
+-          category: "/language:${{matrix.language}}"
+-
+   ci-success:
+     runs-on: ubuntu-latest
+     if: always()
+     permissions: {}
+     needs:
+       - test
+-      - docs
+       - doctest
+       - typos
+       - clippy
+       - rustfmt
+       - forge-fmt
+       - crate-checks
+-      - deny
+-      - codeql
+     timeout-minutes: 30
+     steps:
+       - name: Decide whether the needed jobs succeeded or failed
+diff --git a/.github/workflows/docs.yml b/.github/workflows/docs.yml
+index 51681f05d..4b24af353 100644
+--- a/.github/workflows/docs.yml
++++ b/.github/workflows/docs.yml
+@@ -19,7 +19,7 @@ env:
+ 
+ jobs:
+   docs:
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       contents: read
+@@ -49,7 +49,7 @@ jobs:
+   deploy-docs:
+     if: github.ref_name == 'master' && github.event_name == 'push'
+     needs: [docs]
+-    runs-on: depot-ubuntu-latest
++    runs-on: ubuntu-latest
+     timeout-minutes: 30
+     permissions:
+       pages: write
+diff --git a/.github/workflows/release-debug.yml b/.github/workflows/release-debug.yml
+new file mode 100644
+index 000000000..e4aee22f4
+--- /dev/null
++++ b/.github/workflows/release-debug.yml
+@@ -0,0 +1,232 @@
++name: release-debug
++
++permissions: {}
++
++on:
++  workflow_dispatch:
++
++env:
++  CARGO_TERM_COLOR: always
++  IS_NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
++
++  RUST_PROFILE: maxperf
++  RUST_FEATURES: aws-kms,gcp-kms,turnkey,cli,asm-keccak,js-tracer
++
++  LAST_STABLE_VERSION: "v1.5.0"
++
++jobs:
++  prepare:
++    name: Prepare release
++    runs-on: ubuntu-latest
++    timeout-minutes: 30
++    permissions:
++      contents: write
++      pull-requests: read
++    outputs:
++      tag_name: ${{ steps.release_info.outputs.tag_name }}
++      release_name: ${{ steps.release_info.outputs.release_name }}
++    steps:
++      - uses: actions/checkout@v5
++        with:
++          persist-credentials: false
++          fetch-depth: 0
++
++      - name: Compute release name and tag
++        id: release_info
++        run: |
++          printf 'tag_name=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
++          printf 'release_name=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
++
++  release:
++    permissions:
++      id-token: write
++      contents: write
++      attestations: write
++    name: ${{ matrix.target }} (${{ matrix.runner }})
++    runs-on: ${{ matrix.runner }}
++    timeout-minutes: 240
++    needs: prepare
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          # `runner`: GHA runner label
++          # `target`: Rust build target triple
++          # `platform` and `arch`: Used in tarball names
++          # `svm`: target platform to use for the Solc binary: https://github.com/roynalnaruto/svm-rs/blob/84cbe0ac705becabdc13168bae28a45ad2299749/svm-builds/build.rs#L4-L24
++          - runner: ubuntu-22.04
++            target: x86_64-unknown-linux-gnu
++            svm_target_platform: linux-amd64
++            platform: linux
++            arch: amd64
++          - runner: ubuntu-22.04
++            target: x86_64-unknown-linux-musl
++            svm_target_platform: linux-amd64
++            platform: alpine
++            arch: amd64
++          - runner: ubuntu-22.04-arm
++            target: aarch64-unknown-linux-gnu
++            svm_target_platform: linux-aarch64
++            platform: linux
++            arch: arm64
++          - runner: ubuntu-22.04
++            target: aarch64-unknown-linux-musl
++            svm_target_platform: linux-aarch64
++            platform: alpine
++            arch: arm64
++          - runner: macos-13
++            target: x86_64-apple-darwin
++            svm_target_platform: macosx-amd64
++            platform: darwin
++            arch: amd64
++          - runner: macos-latest
++            target: aarch64-apple-darwin
++            svm_target_platform: macosx-aarch64
++            platform: darwin
++            arch: arm64
++          - runner: windows-latest
++            target: x86_64-pc-windows-msvc
++            svm_target_platform: windows-amd64
++            platform: win32
++            arch: amd64
++    steps:
++      - uses: actions/checkout@v5
++        with:
++          persist-credentials: false
++      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
++        with:
++          toolchain: stable
++          targets: ${{ matrix.target }}
++      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
++
++      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
++      - run: printf 'RUSTC_WRAPPER=sccache\n' >> "$GITHUB_ENV"
++
++      - name: Set git config for long paths
++        if: matrix.target == 'x86_64-pc-windows-msvc'
++        run: |
++          git config --system core.longpaths true
++
++      - name: Apple M1 setup
++        if: matrix.target == 'aarch64-apple-darwin'
++        run: |
++          printf 'SDKROOT=%s\n' "$(xcrun -sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
++          printf 'MACOSX_DEPLOYMENT_TARGET=%s\n' "$(xcrun -sdk macosx --show-sdk-platform-version)" >> "$GITHUB_ENV"
++
++      - name: cross setup
++        if: contains(matrix.target, 'musl')
++        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2
++        with:
++          git: https://github.com/cross-rs/cross
++          rev: baf457efc2555225af47963475bd70e8d2f5993f
++          tool: cross
++
++      - name: Build binaries
++        env:
++          TAG_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
++          SVM_TARGET_PLATFORM: ${{ matrix.svm_target_platform }}
++          PLATFORM_NAME: ${{ matrix.platform }}
++          TARGET: ${{ matrix.target }}
++          OUT_DIR: target/${{ matrix.target }}/${{ env.RUST_PROFILE }}
++        shell: bash
++        run: |
++          set -eo pipefail
++          # Only build arbos-* binaries for release (not the compatibility aliases)
++          flags=(--target $TARGET --profile $RUST_PROFILE
++            --bin arbos-forge --bin arbos-cast --bin arbos-anvil --bin arbos-chisel
++            --no-default-features --features "$RUST_FEATURES")
++
++          # `jemalloc` is not fully supported on MSVC or aarch64 Linux.
++          if [[ "$TARGET" != *msvc* && "$TARGET" != "aarch64-unknown-linux-gnu" ]]; then
++            flags+=(--features jemalloc)
++          fi
++
++          [[ "$TARGET" == *windows* ]] && ext=".exe"
++
++          if [[ "$TARGET" == *-musl ]]; then
++            cross build "${flags[@]}"
++          else
++            cargo build "${flags[@]}"
++          fi
++
++          bins=(arbos-anvil arbos-cast arbos-chisel arbos-forge)
++          for name in "${bins[@]}"; do
++            bin="$OUT_DIR/$name$ext"
++            printf '\n'
++            file "$bin" || true
++            du -h "$bin" || true
++            ldd "$bin" || true
++            $bin --version || true
++            printf '%s_bin_path=%s\n' "$name" "$bin" >> "$GITHUB_ENV"
++          done
++
++      - name: Archive binaries
++        id: artifacts
++        env:
++          PLATFORM_NAME: ${{ matrix.platform }}
++          OUT_DIR: target/${{ matrix.target }}/${{ env.RUST_PROFILE }}
++          VERSION_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
++          ARCH: ${{ matrix.arch }}
++        shell: bash
++        run: |
++          if [[ "$PLATFORM_NAME" == "linux" || "$PLATFORM_NAME" == "alpine" ]]; then
++            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
++            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
++          elif [ "$PLATFORM_NAME" == "darwin" ]; then
++            # We need to use gtar here otherwise the archive is corrupt.
++            # See: https://github.com/actions/virtual-environments/issues/2619
++            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
++            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
++          else
++            cd "$OUT_DIR"
++            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe arbos-anvil.exe arbos-chisel.exe
++            mv "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
++            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> "$GITHUB_OUTPUT"
++          fi
++          printf "foundry_attestation=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.attestation.txt" >> "$GITHUB_OUTPUT"
++
++      - name: Upload build artifacts
++        uses: actions/upload-artifact@v5
++        with:
++          retention-days: 1
++          name: ${{ steps.artifacts.outputs.file_name }}
++          path: ${{ steps.artifacts.outputs.file_name }}
++
++      - name: Build man page
++        id: man
++        if: matrix.target == 'x86_64-unknown-linux-gnu'
++        env:
++          OUT_DIR: target/${{ matrix.target }}/${{ env.RUST_PROFILE }}
++          VERSION_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
++        shell: bash
++        run: |
++          sudo apt-get -y install help2man
++          help2man -N $OUT_DIR/arbos-forge > arbos-forge.1
++          help2man -N $OUT_DIR/arbos-cast > arbos-cast.1
++          help2man -N $OUT_DIR/arbos-anvil > arbos-anvil.1
++          help2man -N $OUT_DIR/arbos-chisel > arbos-chisel.1
++          gzip arbos-forge.1
++          gzip arbos-cast.1
++          gzip arbos-anvil.1
++          gzip arbos-chisel.1
++          tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" arbos-forge.1.gz arbos-cast.1.gz arbos-anvil.1.gz arbos-chisel.1.gz
++          printf 'foundry_man=%s\n' "foundry_man_${VERSION_NAME}.tar.gz" >> "$GITHUB_OUTPUT"
++
++      - name: Binaries attestation
++        id: attestation
++        uses: actions/attest-build-provenance@v3
++        with:
++          subject-path: |
++            ${{ env.arbos-anvil_bin_path }}
++            ${{ env.arbos-cast_bin_path }}
++            ${{ env.arbos-chisel_bin_path }}
++            ${{ env.arbos-forge_bin_path }}
++
++      - name: Record attestation URL
++        env:
++          ATTESTATION_URL: ${{ steps.attestation.outputs.attestation-url }}
++          FOUNDRY_ATTESTATION: ${{ steps.artifacts.outputs.foundry_attestation }}
++        shell: bash
++        run: |
++          set -euo pipefail
++          printf '%s\n' "$ATTESTATION_URL" > "$FOUNDRY_ATTESTATION"
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 9ebe64821..262c648d2 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -9,15 +9,12 @@ on:
+       - "rc"
+       - "rc-*"
+       - "v*.*.*"
+-  schedule:
+-    - cron: "0 6 * * *"
+   workflow_dispatch:
+ 
+ env:
+   CARGO_TERM_COLOR: always
+   IS_NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+ 
+-  # Keep in sync with `docker-publish.yml`.
+   RUST_PROFILE: maxperf
+   RUST_FEATURES: aws-kms,gcp-kms,turnkey,cli,asm-keccak,js-tracer
+ 
+@@ -71,22 +68,11 @@ jobs:
+         uses: mikepenz/release-changelog-builder-action@439f79b5b5428107c7688c1d2b0e8bacc9b8792c # v6
+         with:
+           configuration: "./.github/changelog.json"
+-          fromTag: ${{ env.IS_NIGHTLY == 'true' && 'nightly' || env.STABLE_VERSION }}
++          fromTag: ${{ env.IS_NIGHTLY == 'true' && 'nightly' || env.LAST_STABLE_VERSION }}
+           toTag: ${{ steps.release_info.outputs.tag_name }}
+         env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 
+-  release-docker:
+-    name: Release Docker
+-    needs: prepare
+-    uses: ./.github/workflows/docker-publish.yml
+-    permissions:
+-      contents: read
+-      id-token: write
+-      packages: write
+-    with:
+-      tag_name: ${{ needs.prepare.outputs.tag_name }}
+-
+   release:
+     permissions:
+       id-token: write
+@@ -105,37 +91,37 @@ jobs:
+           # `platform` and `arch`: Used in tarball names
+           # `svm`: target platform to use for the Solc binary: https://github.com/roynalnaruto/svm-rs/blob/84cbe0ac705becabdc13168bae28a45ad2299749/svm-builds/build.rs#L4-L24
+           # These are pinned to the oldest runner versions to support old libc/SDK versions.
+-          - runner: depot-ubuntu-22.04-16
++          - runner: ubuntu-22.04
+             target: x86_64-unknown-linux-gnu
+             svm_target_platform: linux-amd64
+             platform: linux
+             arch: amd64
+-          - runner: depot-ubuntu-22.04-16
++          - runner: ubuntu-22.04
+             target: x86_64-unknown-linux-musl
+             svm_target_platform: linux-amd64
+             platform: alpine
+             arch: amd64
+-          - runner: depot-ubuntu-22.04-arm-16
++          - runner: ubuntu-22.04-arm
+             target: aarch64-unknown-linux-gnu
+             svm_target_platform: linux-aarch64
+             platform: linux
+             arch: arm64
+-          - runner: depot-ubuntu-22.04-16
++          - runner: ubuntu-22.04
+             target: aarch64-unknown-linux-musl
+             svm_target_platform: linux-aarch64
+             platform: alpine
+             arch: arm64
+-          - runner: macos-14-large
++          - runner: macos-13
+             target: x86_64-apple-darwin
+             svm_target_platform: macosx-amd64
+             platform: darwin
+             arch: amd64
+-          - runner: macos-latest-large
++          - runner: macos-latest
+             target: aarch64-apple-darwin
+             svm_target_platform: macosx-aarch64
+             platform: darwin
+             arch: arm64
+-          - runner: depot-windows-latest-16
++          - runner: windows-latest
+             target: x86_64-pc-windows-msvc
+             svm_target_platform: windows-amd64
+             platform: win32
+@@ -151,9 +137,12 @@ jobs:
+       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+ 
+       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+-        if: ${{ contains(matrix.runner, 'depot') }}
+       - run: printf 'RUSTC_WRAPPER=sccache\n' >> "$GITHUB_ENV"
+-        if: ${{ contains(matrix.runner, 'depot') }}
++
++      - name: Set git config for long paths
++        if: matrix.target == 'x86_64-pc-windows-msvc'
++        run: |
++          git config --system core.longpaths true
+ 
+       - name: Apple M1 setup
+         if: matrix.target == 'aarch64-apple-darwin'
+@@ -179,7 +168,9 @@ jobs:
+         shell: bash
+         run: |
+           set -eo pipefail
+-          flags=(--target $TARGET --profile $RUST_PROFILE --bins
++          # Only build arbos-* binaries for release (not the compatibility aliases)
++          flags=(--target $TARGET --profile $RUST_PROFILE
++            --bin arbos-forge --bin arbos-cast --bin arbos-anvil --bin arbos-chisel
+             --no-default-features --features "$RUST_FEATURES")
+ 
+           # `jemalloc` is not fully supported on MSVC or aarch64 Linux.
+@@ -195,7 +186,7 @@ jobs:
+             cargo build "${flags[@]}"
+           fi
+ 
+-          bins=(anvil cast chisel forge)
++          bins=(arbos-anvil arbos-cast arbos-chisel arbos-forge)
+           for name in "${bins[@]}"; do
+             bin="$OUT_DIR/$name$ext"
+             printf '\n'
+@@ -216,16 +207,16 @@ jobs:
+         shell: bash
+         run: |
+           if [[ "$PLATFORM_NAME" == "linux" || "$PLATFORM_NAME" == "alpine" ]]; then
+-            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" forge cast anvil chisel
++            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
+             printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+           elif [ "$PLATFORM_NAME" == "darwin" ]; then
+             # We need to use gtar here otherwise the archive is corrupt.
+             # See: https://github.com/actions/virtual-environments/issues/2619
+-            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" forge cast anvil chisel
++            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
+             printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+           else
+             cd "$OUT_DIR"
+-            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" forge.exe cast.exe anvil.exe chisel.exe
++            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe arbos-anvil.exe arbos-chisel.exe
+             mv "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
+             printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> "$GITHUB_OUTPUT"
+           fi
+@@ -247,15 +238,15 @@ jobs:
+         shell: bash
+         run: |
+           sudo apt-get -y install help2man
+-          help2man -N $OUT_DIR/forge > forge.1
+-          help2man -N $OUT_DIR/cast > cast.1
+-          help2man -N $OUT_DIR/anvil > anvil.1
+-          help2man -N $OUT_DIR/chisel > chisel.1
+-          gzip forge.1
+-          gzip cast.1
+-          gzip anvil.1
+-          gzip chisel.1
+-          tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" forge.1.gz cast.1.gz anvil.1.gz chisel.1.gz
++          help2man -N $OUT_DIR/arbos-forge > arbos-forge.1
++          help2man -N $OUT_DIR/arbos-cast > arbos-cast.1
++          help2man -N $OUT_DIR/arbos-anvil > arbos-anvil.1
++          help2man -N $OUT_DIR/arbos-chisel > arbos-chisel.1
++          gzip arbos-forge.1
++          gzip arbos-cast.1
++          gzip arbos-anvil.1
++          gzip arbos-chisel.1
++          tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" arbos-forge.1.gz arbos-cast.1.gz arbos-anvil.1.gz arbos-chisel.1.gz
+           printf 'foundry_man=%s\n' "foundry_man_${VERSION_NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+ 
+       - name: Binaries attestation
+@@ -263,10 +254,10 @@ jobs:
+         uses: actions/attest-build-provenance@v3
+         with:
+           subject-path: |
+-            ${{ env.anvil_bin_path }}
+-            ${{ env.cast_bin_path }}
+-            ${{ env.chisel_bin_path }}
+-            ${{ env.forge_bin_path }}
++            ${{ env.arbos-anvil_bin_path }}
++            ${{ env.arbos-cast_bin_path }}
++            ${{ env.arbos-chisel_bin_path }}
++            ${{ env.arbos-forge_bin_path }}
+ 
+       - name: Record attestation URL
+         env:
+@@ -333,25 +324,3 @@ jobs:
+           script: |
+             const prunePrereleases = require('./.github/scripts/prune-prereleases.js')
+             await prunePrereleases({github, context})
+-
+-  # If any of the jobs fail, this will create a high-priority issue to signal so.
+-  issue:
+-    name: Open an issue
+-    runs-on: ubuntu-latest
+-    needs: [prepare, release-docker, release, cleanup]
+-    if: failure()
+-    permissions:
+-      contents: read
+-      issues: write
+-    steps:
+-      - uses: actions/checkout@v5
+-        with:
+-          persist-credentials: false
+-      - uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5 # v2
+-        env:
+-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+-          WORKFLOW_URL: |
+-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+-        with:
+-          update_existing: true
+-          filename: .github/RELEASE_FAILURE_ISSUE_TEMPLATE.md
+diff --git a/.github/workflows/test-isolate.yml b/.github/workflows/test-isolate.yml
+index ddd80b3e0..1ad149b50 100644
+--- a/.github/workflows/test-isolate.yml
++++ b/.github/workflows/test-isolate.yml
+@@ -5,8 +5,6 @@ name: test-isolate
+ permissions: {}
+ 
+ on:
+-  schedule:
+-    - cron: "0 0 * * *" # Run daily at midnight UTC
+   workflow_dispatch: # Needed so we can run it manually
+ 
+ jobs:
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index 7558528ce..d2d4a1f8c 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -19,6 +19,7 @@ env:
+   CARGO_TERM_COLOR: always
+   RUST_BACKTRACE: full
+   RUSTC_WRAPPER: "sccache"
++  RUST_MIN_STACK: 4194304 # 2 * the default (2 * 1024 * 1024)   
+ 
+ jobs:
+   matrices:
+@@ -39,7 +40,7 @@ jobs:
+         id: gen
+         env:
+           EVENT_NAME: ${{ github.event_name }}
+-          PROFILE: ${{ inputs.profile }}
++          PROFILE: ${{ inputs.profile || 'default' }}
+         shell: bash
+         run: |
+           output=$(python3 .github/scripts/matrices.py)
+@@ -107,6 +108,10 @@ jobs:
+           git config --global user.name "GitHub Actions Bot"
+           git config --global user.email "<>"
+           git config --global url."https://github.com/".insteadOf "git@github.com:"
++      - name: Set git config for long paths
++        if: contains(matrix.runner_label, 'windows')
++        run: |
++          git config --system core.longpaths true
+       - name: Test
+         env:
+           SVM_TARGET_PLATFORM: ${{ matrix.svm_target_platform }}
+@@ -114,4 +119,5 @@ jobs:
+           WS_ARCHIVE_URLS: ${{ secrets.WS_ARCHIVE_URLS }}
+           ETHERSCAN_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+           ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
++          RUSTC_WRAPPER: ${{ env.ACT && '' || 'sccache' }}
+         run: cargo nextest run ${{ matrix.flags }}
+diff --git a/crates/anvil/Cargo.toml b/crates/anvil/Cargo.toml
+index 134f836c8..ebb99d73f 100644
+--- a/crates/anvil/Cargo.toml
++++ b/crates/anvil/Cargo.toml
+@@ -10,14 +10,23 @@ license.workspace = true
+ homepage.workspace = true
+ repository.workspace = true
+ 
++# Disable auto-discovery since we have multiple binaries sharing the same source
++autobins = false
++
+ [lints]
+ workspace = true
+ 
+ [[bin]]
+-name = "anvil"
++name = "arbos-anvil"
+ path = "bin/main.rs"
+ required-features = ["cli"]
+ 
++# Alias binary for backwards compatibility and tests
++[[bin]]
++name = "anvil"
++path = "bin/anvil_alias.rs"
++required-features = ["cli"]
++
+ [dependencies]
+ # foundry internal
+ anvil-core = { path = "core" }
+diff --git a/crates/anvil/bin/anvil_alias.rs b/crates/anvil/bin/anvil_alias.rs
+new file mode 100644
+index 000000000..ef20f0156
+--- /dev/null
++++ b/crates/anvil/bin/anvil_alias.rs
+@@ -0,0 +1,14 @@
++// Alias binary for backwards compatibility and tests.
++// This is identical to arbos-anvil.
++
++use anvil::args::run;
++
++#[global_allocator]
++static ALLOC: foundry_cli::utils::Allocator = foundry_cli::utils::new_allocator();
++
++fn main() {
++    if let Err(err) = run() {
++        let _ = foundry_common::sh_err!("{err:?}");
++        std::process::exit(1);
++    }
++}
+diff --git a/crates/cast/Cargo.toml b/crates/cast/Cargo.toml
+index b10e5f3a8..e82fb813b 100644
+--- a/crates/cast/Cargo.toml
++++ b/crates/cast/Cargo.toml
+@@ -10,6 +10,9 @@ license.workspace = true
+ homepage.workspace = true
+ repository.workspace = true
+ 
++# Disable auto-discovery since we have multiple binaries sharing the same source
++autobins = false
++
+ [lints]
+ workspace = true
+ 
+@@ -17,9 +20,14 @@ workspace = true
+ name = "cast"
+ 
+ [[bin]]
+-name = "cast"
++name = "arbos-cast"
+ path = "bin/main.rs"
+ 
++# Alias binary for backwards compatibility and tests
++[[bin]]
++name = "cast"
++path = "bin/cast_alias.rs"
++
+ [dependencies]
+ # lib
+ foundry-block-explorers.workspace = true
+diff --git a/crates/cast/bin/cast_alias.rs b/crates/cast/bin/cast_alias.rs
+new file mode 100644
+index 000000000..e648bce05
+--- /dev/null
++++ b/crates/cast/bin/cast_alias.rs
+@@ -0,0 +1,14 @@
++// Alias binary for backwards compatibility and tests.
++// This is identical to arbos-cast.
++
++use cast::args::run;
++
++#[global_allocator]
++static ALLOC: foundry_cli::utils::Allocator = foundry_cli::utils::new_allocator();
++
++fn main() {
++    if let Err(err) = run() {
++        let _ = foundry_common::sh_err!("{err:?}");
++        std::process::exit(1);
++    }
++}
+diff --git a/crates/chisel/Cargo.toml b/crates/chisel/Cargo.toml
+index 877d091dd..83a6e03cf 100644
+--- a/crates/chisel/Cargo.toml
++++ b/crates/chisel/Cargo.toml
+@@ -10,13 +10,21 @@ license.workspace = true
+ homepage.workspace = true
+ repository.workspace = true
+ 
++# Disable auto-discovery since we have multiple binaries sharing the same source
++autobins = false
++
+ [lints]
+ workspace = true
+ 
+ [[bin]]
+-name = "chisel"
++name = "arbos-chisel"
+ path = "bin/main.rs"
+ 
++# Alias binary for backwards compatibility and tests
++[[bin]]
++name = "chisel"
++path = "bin/chisel_alias.rs"
++
+ [dependencies]
+ # forge
+ forge-doc.workspace = true
+diff --git a/crates/chisel/bin/chisel_alias.rs b/crates/chisel/bin/chisel_alias.rs
+new file mode 100644
+index 000000000..5abf74a95
+--- /dev/null
++++ b/crates/chisel/bin/chisel_alias.rs
+@@ -0,0 +1,14 @@
++// Alias binary for backwards compatibility and tests.
++// This is identical to arbos-chisel.
++
++use chisel::args::run;
++
++#[global_allocator]
++static ALLOC: foundry_cli::utils::Allocator = foundry_cli::utils::new_allocator();
++
++fn main() {
++    if let Err(err) = run() {
++        let _ = foundry_common::sh_err!("{err:?}");
++        std::process::exit(1);
++    }
++}
+diff --git a/crates/forge/Cargo.toml b/crates/forge/Cargo.toml
+index c8b34b6b7..d28a55f5c 100644
+--- a/crates/forge/Cargo.toml
++++ b/crates/forge/Cargo.toml
+@@ -10,13 +10,21 @@ license.workspace = true
+ homepage.workspace = true
+ repository.workspace = true
+ 
++# Disable auto-discovery since we have multiple binaries sharing the same source
++autobins = false
++
+ [lints]
+ workspace = true
+ 
+ [[bin]]
+-name = "forge"
++name = "arbos-forge"
+ path = "bin/main.rs"
+ 
++# Alias binary for backwards compatibility and tests
++[[bin]]
++name = "forge"
++path = "bin/forge_alias.rs"
++
+ [[test]]
+ name = "ui"
+ path = "tests/ui.rs"
+diff --git a/crates/forge/bin/forge_alias.rs b/crates/forge/bin/forge_alias.rs
+new file mode 100644
+index 000000000..3768d3c39
+--- /dev/null
++++ b/crates/forge/bin/forge_alias.rs
+@@ -0,0 +1,14 @@
++// Alias binary for backwards compatibility and tests.
++// This is identical to arbos-forge.
++
++use forge::args::run;
++
++#[global_allocator]
++static ALLOC: foundry_cli::utils::Allocator = foundry_cli::utils::new_allocator();
++
++fn main() {
++    if let Err(err) = run() {
++        let _ = foundry_common::sh_err!("{err:?}");
++        std::process::exit(1);
++    }
++}
+diff --git a/foundryup/foundryup b/foundryup/foundryup
+index 926e13073..eb02efd18 100755
+--- a/foundryup/foundryup
++++ b/foundryup/foundryup
+@@ -15,7 +15,7 @@ FOUNDRY_BIN_PATH="$FOUNDRY_BIN_DIR/foundryup"
+ FOUNDRYUP_JOBS=""
+ FOUNDRYUP_IGNORE_VERIFICATION=false
+ 
+-BINS=(forge cast anvil chisel)
++BINS=(arbos-forge arbos-cast arbos-anvil arbos-chisel)
+ HASH_NAMES=()
+ HASH_VALUES=()
+ 
+@@ -162,7 +162,7 @@ main() {
+     # If `--force` is set, skip the SHA verification.
+     if [ "$FOUNDRYUP_IGNORE_VERIFICATION" = false ]; then
+       # Check if the version is already installed by downloading the attestation file.
+-      say "checking if forge, cast, anvil, and chisel for $FOUNDRYUP_TAG version are already installed"
++      say "checking if arbos-forge, arbos-cast, arbos-anvil, and arbos-chisel for $FOUNDRYUP_TAG version are already installed"
+ 
+       # Create a temporary directory to store the attestation link and artifact.
+       tmp_dir="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
+@@ -253,7 +253,7 @@ main() {
+     fi
+ 
+     # Download and extract the binaries archive
+-    say "downloading forge, cast, anvil, and chisel for $FOUNDRYUP_TAG version"
++    say "downloading arbos-forge, arbos-cast, arbos-anvil, and arbos-chisel for $FOUNDRYUP_TAG version"
+     if [ "$PLATFORM" = "win32" ]; then
+       tmp="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
+       tmp="$tmp/foundry.zip"
+diff --git a/npm/@foundry-rs/anvil/package.json b/npm/@foundry-rs/anvil/package.json
+index 824823342..0850c4808 100644
+--- a/npm/@foundry-rs/anvil/package.json
++++ b/npm/@foundry-rs/anvil/package.json
+@@ -5,21 +5,21 @@
+   "homepage": "https://getfoundry.sh/anvil",
+   "description": "Anvil is a fast local Ethereum development node",
+   "bin": {
+-    "anvil": "./bin.mjs"
++    "arbos-anvil": "./bin.mjs"
+   },
+   "files": [
+     "bin",
+     "dist"
+   ],
+   "scripts": {
+-    "postinstall": "TARGET_TOOL=anvil node ./dist/postinstall.mjs"
++    "postinstall": "TARGET_TOOL=arbos-anvil node ./dist/postinstall.mjs"
+   },
+   "optionalDependencies": {
+-    "@foundry-rs/anvil-darwin-arm64": "0.0.0",
+-    "@foundry-rs/anvil-darwin-amd64": "0.0.0",
+-    "@foundry-rs/anvil-linux-arm64": "0.0.0",
+-    "@foundry-rs/anvil-linux-amd64": "0.0.0",
+-    "@foundry-rs/anvil-win32-amd64": "0.0.0"
++    "@foundry-rs/arbos-anvil-darwin-arm64": "0.0.0",
++    "@foundry-rs/arbos-anvil-darwin-amd64": "0.0.0",
++    "@foundry-rs/arbos-anvil-linux-arm64": "0.0.0",
++    "@foundry-rs/arbos-anvil-linux-amd64": "0.0.0",
++    "@foundry-rs/arbos-anvil-win32-amd64": "0.0.0"
+   },
+   "publishConfig": {
+     "access": "public",
+diff --git a/npm/@foundry-rs/cast/package.json b/npm/@foundry-rs/cast/package.json
+index e8ab6096f..fd4c03823 100644
+--- a/npm/@foundry-rs/cast/package.json
++++ b/npm/@foundry-rs/cast/package.json
+@@ -5,21 +5,21 @@
+   "homepage": "https://getfoundry.sh/cast",
+   "description": "Swiss Army knife for interacting with Ethereum applications from the command line",
+   "bin": {
+-    "cast": "./bin.mjs"
++    "arbos-cast": "./bin.mjs"
+   },
+   "files": [
+     "bin",
+     "dist"
+   ],
+   "scripts": {
+-    "postinstall": "TARGET_TOOL=cast node ./dist/postinstall.mjs"
++    "postinstall": "TARGET_TOOL=arbos-cast node ./dist/postinstall.mjs"
+   },
+   "optionalDependencies": {
+-    "@foundry-rs/cast-darwin-arm64": "0.0.0",
+-    "@foundry-rs/cast-darwin-amd64": "0.0.0",
+-    "@foundry-rs/cast-linux-arm64": "0.0.0",
+-    "@foundry-rs/cast-linux-amd64": "0.0.0",
+-    "@foundry-rs/cast-win32-amd64": "0.0.0"
++    "@foundry-rs/arbos-cast-darwin-arm64": "0.0.0",
++    "@foundry-rs/arbos-cast-darwin-amd64": "0.0.0",
++    "@foundry-rs/arbos-cast-linux-arm64": "0.0.0",
++    "@foundry-rs/arbos-cast-linux-amd64": "0.0.0",
++    "@foundry-rs/arbos-cast-win32-amd64": "0.0.0"
+   },
+   "publishConfig": {
+     "access": "public",
+diff --git a/npm/@foundry-rs/chisel/package.json b/npm/@foundry-rs/chisel/package.json
+index 2a8690af2..9f4b9150c 100644
+--- a/npm/@foundry-rs/chisel/package.json
++++ b/npm/@foundry-rs/chisel/package.json
+@@ -5,21 +5,21 @@
+   "homepage": "https://getfoundry.sh/chisel",
+   "description": "Chisel is a fast, utilitarian, and verbose Solidity REPL",
+   "bin": {
+-    "chisel": "./bin.mjs"
++    "arbos-chisel": "./bin.mjs"
+   },
+   "files": [
+     "bin",
+     "dist"
+   ],
+   "scripts": {
+-    "postinstall": "TARGET_TOOL=chisel node ./dist/postinstall.mjs"
++    "postinstall": "TARGET_TOOL=arbos-chisel node ./dist/postinstall.mjs"
+   },
+   "optionalDependencies": {
+-    "@foundry-rs/chisel-darwin-arm64": "0.0.0",
+-    "@foundry-rs/chisel-darwin-amd64": "0.0.0",
+-    "@foundry-rs/chisel-linux-arm64": "0.0.0",
+-    "@foundry-rs/chisel-linux-amd64": "0.0.0",
+-    "@foundry-rs/chisel-win32-amd64": "0.0.0"
++    "@foundry-rs/arbos-chisel-darwin-arm64": "0.0.0",
++    "@foundry-rs/arbos-chisel-darwin-amd64": "0.0.0",
++    "@foundry-rs/arbos-chisel-linux-arm64": "0.0.0",
++    "@foundry-rs/arbos-chisel-linux-amd64": "0.0.0",
++    "@foundry-rs/arbos-chisel-win32-amd64": "0.0.0"
+   },
+   "publishConfig": {
+     "access": "public",
+diff --git a/npm/@foundry-rs/forge/package.json b/npm/@foundry-rs/forge/package.json
+index bf33cfb06..ee8731c4e 100644
+--- a/npm/@foundry-rs/forge/package.json
++++ b/npm/@foundry-rs/forge/package.json
+@@ -5,21 +5,21 @@
+   "homepage": "https://getfoundry.sh/forge",
+   "description": "Fast and flexible Ethereum testing framework",
+   "bin": {
+-    "forge": "./bin.mjs"
++    "arbos-forge": "./bin.mjs"
+   },
+   "files": [
+     "bin",
+     "dist"
+   ],
+   "scripts": {
+-    "postinstall": "TARGET_TOOL=forge node ./dist/postinstall.mjs"
++    "postinstall": "TARGET_TOOL=arbos-forge node ./dist/postinstall.mjs"
+   },
+   "optionalDependencies": {
+-    "@foundry-rs/forge-darwin-arm64": "0.0.0",
+-    "@foundry-rs/forge-darwin-amd64": "0.0.0",
+-    "@foundry-rs/forge-linux-arm64": "0.0.0",
+-    "@foundry-rs/forge-linux-amd64": "0.0.0",
+-    "@foundry-rs/forge-win32-amd64": "0.0.0"
++    "@foundry-rs/arbos-forge-darwin-arm64": "0.0.0",
++    "@foundry-rs/arbos-forge-darwin-amd64": "0.0.0",
++    "@foundry-rs/arbos-forge-linux-arm64": "0.0.0",
++    "@foundry-rs/arbos-forge-linux-amd64": "0.0.0",
++    "@foundry-rs/arbos-forge-win32-amd64": "0.0.0"
+   },
+   "publishConfig": {
+     "access": "public",
+diff --git a/npm/scripts/prepublish.mjs b/npm/scripts/prepublish.mjs
+index 40b3ae0e5..41cfa1629 100644
+--- a/npm/scripts/prepublish.mjs
++++ b/npm/scripts/prepublish.mjs
+@@ -70,10 +70,10 @@ const GENERIC_BIN_ENV_KEYS = [
+ ]
+ 
+ const TOOL_ENV_KEYS = /** @type {Record<Tool, readonly string[]>} */ ({
+-  forge: ['forge_bin_path', 'FORGE_BIN_PATH'],
+-  cast: ['cast_bin_path', 'CAST_BIN_PATH'],
+-  anvil: ['anvil_bin_path', 'ANVIL_BIN_PATH'],
+-  chisel: ['chisel_bin_path', 'CHISEL_BIN_PATH']
++  'arbos-forge': ['arbos-forge_bin_path', 'ARBOS_FORGE_BIN_PATH'],
++  'arbos-cast': ['arbos-cast_bin_path', 'ARBOS_CAST_BIN_PATH'],
++  'arbos-anvil': ['arbos-anvil_bin_path', 'ARBOS_ANVIL_BIN_PATH'],
++  'arbos-chisel': ['arbos-chisel_bin_path', 'ARBOS_CHISEL_BIN_PATH']
+ })
+ 
+ main().catch(error => {
+diff --git a/npm/src/const.mjs b/npm/src/const.mjs
+index a37e8dfd7..ce0236799 100644
+--- a/npm/src/const.mjs
++++ b/npm/src/const.mjs
+@@ -3,12 +3,12 @@ import * as NodePath from 'node:path'
+ /**
+  * @typedef {'amd64' | 'arm64'} Arch
+  * @typedef {'linux' | 'darwin' | 'win32'} Platform
+- * @typedef {'forge' | 'cast' | 'anvil' | 'chisel'} Tool
++ * @typedef {'arbos-forge' | 'arbos-cast' | 'arbos-anvil' | 'arbos-chisel'} Tool
+  * @typedef {'debug' | 'release' | 'maxperf'} Profile
+  */
+ 
+ /** @type {readonly Tool[]} */
+-export const KNOWN_TOOLS = Object.freeze(['forge', 'cast', 'anvil', 'chisel'])
++export const KNOWN_TOOLS = Object.freeze(['arbos-forge', 'arbos-cast', 'arbos-anvil', 'arbos-chisel'])
+ 
+ const TOOL_SET = new Set(KNOWN_TOOLS)
+ 
+diff --git a/npm/src/generate-package-json.mjs b/npm/src/generate-package-json.mjs
+index 851b8e1c9..79997f0a1 100644
+--- a/npm/src/generate-package-json.mjs
++++ b/npm/src/generate-package-json.mjs
+@@ -19,19 +19,19 @@ import { colors } from '#const.mjs'
+  */
+ 
+ const TOOL_META = /** @type {const} */ (/** @type {Record<Tool, { homepage: string; description: string }>} */ ({
+-  forge: {
++  'arbos-forge': {
+     homepage: 'https://getfoundry.sh/forge',
+     description: 'Fast and flexible Ethereum testing framework'
+   },
+-  cast: {
++  'arbos-cast': {
+     homepage: 'https://getfoundry.sh/cast',
+     description: 'Swiss Army knife for interacting with Ethereum applications from the command line'
+   },
+-  anvil: {
++  'arbos-anvil': {
+     homepage: 'https://getfoundry.sh/anvil',
+     description: 'Anvil is a fast local Ethereum development node'
+   },
+-  chisel: {
++  'arbos-chisel': {
+     homepage: 'https://getfoundry.sh/chisel',
+     description: 'Chisel is a fast, utilitarian, and verbose Solidity REPL'
+   }
+-- 
+2.43.0
+
