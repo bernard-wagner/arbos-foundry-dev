@@ -71,7 +71,7 @@ t_linux_x86 = Target(
     "ubuntu-latest", "x86_64-unknown-linux-gnu", "linux-amd64"
 )
 t_linux_arm = Target(
-    "ubuntu-latest-arm", "aarch64-unknown-linux-gnu", "linux-aarch64"
+    "ubuntu-24.04-arm", "aarch64-unknown-linux-gnu", "linux-aarch64"
 )
 t_macos = Target("macos-latest", "aarch64-apple-darwin", "macosx-aarch64")
 t_windows = Target("windows-latest", "x86_64-pc-windows-msvc", "windows-amd64")
