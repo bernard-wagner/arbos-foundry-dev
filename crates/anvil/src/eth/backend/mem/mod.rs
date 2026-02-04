@@ -1597,7 +1597,7 @@ impl Backend {
             ..Default::default()
         };
         base.set_signed_authorization(authorization_list.unwrap_or_default());
-        env.tx = base;
+        env.tx = base.into();
 
         if let Some(nonce) = nonce {
             env.tx.nonce = nonce;
@@ -2745,7 +2745,7 @@ impl Backend {
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
 
             let result = evm
-                .inspect_tx(tx_env.clone())
+                .inspect_tx(tx_env.clone().into())
                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
             Ok(f(result, cache_db, inspector, tx_env, env))

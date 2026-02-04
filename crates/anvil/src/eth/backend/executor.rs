@@ -30,6 +30,7 @@ use foundry_evm::{
     FoundryContext, FromRecoveredTx,
     backend::DatabaseError,
     core::{
+        FoundryCfgEnv, FoundryLocalContext,
         either_evm::EitherEvm,
         precompiles::{DynPrecompile, EC_RECOVER, FoundryPrecompiles, Precompile},
     },
@@ -38,9 +39,7 @@ use foundry_evm::{
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
     Database, DatabaseRef, InspectCommitEvm, Inspector, Journal,
-    context::{
-        Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv,
-    },
+    context::{Block as RevmBlock, BlockEnv, Cfg, Evm as RevmEvm, JournalTr, TxEnv},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
     handler::{EthPrecompiles, instructions::EthInstructions},
@@ -111,7 +110,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
-    pub cfg_env: CfgEnv,
+    pub cfg_env: FoundryCfgEnv,
     pub parent_hash: B256,
     /// Cumulative gas used by all executed transactions
     pub gas_used: u64,
@@ -296,7 +295,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
             tx_env.authorization_list = cheated_auths;
         }
 
-        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
+        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env.into(), self.networks)
     }
 }
 
@@ -509,7 +508,7 @@ where
         cfg: env.evm_env.cfg_env.clone(),
         tx: env.tx.clone(),
         chain: (),
-        local: LocalContext::default(),
+        local: FoundryLocalContext::default(),
         error: Ok(()),
     };
 
