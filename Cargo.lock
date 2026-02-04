@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.0.1"
-source = "git+https://github.com/iosiro/arbos-revm?rev=a48b8f016568c85fa2c05b96886e97dfde1de6f4#a48b8f016568c85fa2c05b96886e97dfde1de6f4"
+source = "git+https://github.com/iosiro/arbos-revm?rev=4f13807f8d1b3659fbb29b4c874fa3dd8402f363#4f13807f8d1b3659fbb29b4c874fa3dd8402f363"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -1228,8 +1228,13 @@ dependencies = [
  "lru 0.16.3",
  "revm",
  "stylus",
+ "thiserror 2.0.17",
  "tracing",
+ "wasm-encoder 0.244.0",
+ "wasmer",
  "wasmer-types",
+ "wasmparser 0.244.0",
+ "wasmprinter",
 ]
 
 [[package]]
@@ -4847,10 +4852,6 @@ dependencies = [
  "toml 0.9.8",
  "tracing",
  "walkdir",
- "wasm-encoder 0.244.0",
- "wasmer",
- "wasmparser 0.244.0",
- "wasmprinter",
 ]
 
 [[package]]

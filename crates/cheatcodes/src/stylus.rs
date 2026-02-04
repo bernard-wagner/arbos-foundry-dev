@@ -2,15 +2,17 @@ use std::{fs, path::PathBuf};
 
 use alloy_primitives::{Address, Bytes, U256, address, hex};
 use alloy_sol_types::SolValue;
-use arbos_revm::{state::program::activate_program, stylus_executor::stylus_code};
+use arbos_revm::{
+    state::program::activate_program,
+    stylus_executor::stylus_code,
+    utils::strip_wasm_for_stylus,
+};
 use foundry_config::fs_permissions::FsAccessKind;
 use revm::{
     context::{ContextTr, CreateScheme, JournalTr},
     interpreter::{CallInputs, CallScheme, CreateInputs},
 };
 use spec::Vm::*;
-use wasm_encoder::{Module, RawSection};
-use wasmparser::{Parser, Payload};
 
 use crate::{Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Result};
 
@@ -223,13 +225,9 @@ fn get_stylus_bytecode(state: &Cheatcodes, path: &str) -> Result<Bytes> {
     // if it starts with WASM magic number, we assume it's a Stylus artifact and we first
     // need to compress it and then prefix it with Stylus discriminant
     let artifact = if artifact.starts_with(&[0x00, 0x61, 0x73, 0x6d]) {
-        // Strip custom and unknown sections to remove sensitive metadata
-        let artifact = strip_user_metadata(&artifact)
-            .map_err(|e| fmt_err!("failed to strip user metadata: {}", e))?;
-
-        // Convert wasm to wat and back to strip dangling reference types
-        let artifact = remove_dangling_references(&artifact)
-            .map_err(|e| fmt_err!("failed to remove dangling references: {}", e))?;
+        // Strip user metadata and dangling reference types
+        let artifact = strip_wasm_for_stylus(&artifact)
+            .map_err(|e| fmt_err!("failed to strip WASM for Stylus: {}", e))?;
 
         // Compress the artifact
         stylus::brotli::compress(&artifact, 11, 22, stylus::brotli::Dictionary::Empty)
@@ -298,55 +296,4 @@ fn brotli_decompress(compressed: &Bytes) -> Result {
     let decompressed = stylus::brotli::decompress(compressed, stylus::brotli::Dictionary::Empty)
         .map_err(|_| fmt_err!("brotli decompression failed"))?;
     Ok(Bytes::from(decompressed).abi_encode())
-}
-
-/// Strip all custom and unknown sections from the Wasm binary.
-///
-/// This removes any user metadata which we do not want to leak as part of the final binary.
-fn strip_user_metadata(
-    wasm_file_bytes: impl AsRef<[u8]>,
-) -> std::result::Result<Vec<u8>, wasmparser::BinaryReaderError> {
-    let mut module = Module::new();
-    // Parse the input WASM and iterate over the sections
-    let parser = Parser::new(0);
-    for payload in parser.parse_all(wasm_file_bytes.as_ref()) {
-        match payload? {
-            Payload::CustomSection { .. } => {
-                // Skip custom sections to remove sensitive metadata
-            }
-            Payload::UnknownSection { .. } => {
-                // Skip unknown sections that might contain sensitive data
-            }
-            item => {
-                if let Some((id, range)) = item.as_section() {
-                    let data = &wasm_file_bytes.as_ref()[range];
-                    let raw_section = RawSection { id, data };
-                    module.section(&raw_section);
-                }
-            }
-        }
-    }
-    Ok(module.finish())
-}
-
-/// Convert the WASM from binary to text and back to binary.
-///
-/// This trick removes any dangling mentions of reference types in the wasm body, which are not yet
-/// supported by Arbitrum chain backends.
-fn remove_dangling_references(
-    wasm: impl AsRef<[u8]>,
-) -> std::result::Result<Vec<u8>, RemoveDanglingReferencesError> {
-    let wat_string = wasmprinter::print_bytes(wasm)
-        .map_err(|e| RemoveDanglingReferencesError::Wasm2Wat(e.to_string()))?;
-    let wasm = wasmer::wat2wasm(wat_string.as_bytes())
-        .map_err(|e| RemoveDanglingReferencesError::Wat2Wasm(e.to_string()))?;
-    Ok(wasm.to_vec())
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum RemoveDanglingReferencesError {
-    #[error("failed to convert Wasm to Wat: {0}")]
-    Wasm2Wat(String),
-    #[error("failed to convert Wat to Wasm: {0}")]
-    Wat2Wasm(String),
 }
