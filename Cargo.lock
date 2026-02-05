@@ -1200,7 +1200,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.0.1"
-source = "git+https://github.com/iosiro/arbos-revm?rev=693409984b95362b1bc53fd0bb46caadc4ea5ffc#693409984b95362b1bc53fd0bb46caadc4ea5ffc"
+source = "git+https://github.com/iosiro/arbos-revm?rev=4f13807f8d1b3659fbb29b4c874fa3dd8402f363#4f13807f8d1b3659fbb29b4c874fa3dd8402f363"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -1210,9 +1210,13 @@ dependencies = [
  "lru 0.16.3",
  "revm",
  "stylus",
+ "thiserror 2.0.17",
  "tracing",
+ "wasm-encoder 0.244.0",
  "wasmer",
  "wasmer-types",
+ "wasmparser 0.244.0",
+ "wasmprinter",
 ]
 
 [[package]]
@@ -1230,7 +1234,7 @@ dependencies = [
  "serde",
  "siphasher 0.3.11",
  "tiny-keccak",
- "wasmparser",
+ "wasmparser 0.121.2",
 ]
 
 [[package]]
@@ -4797,6 +4801,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "alloy-sol-types",
+ "arbos-revm",
  "base64 0.22.1",
  "dialoguer",
  "ecdsa",
@@ -5807,6 +5812,7 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]
@@ -6691,6 +6697,12 @@ name = "leb128"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "884e2677b40cc8c339eaefcb701c32ef1fd2493d71118dc0ca4b6a736c93bd67"
+
+[[package]]
+name = "leb128fmt"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "levenshtein"
@@ -8284,7 +8296,7 @@ dependencies = [
  "wasmer",
  "wasmer-compiler-singlepass",
  "wasmer-types",
- "wasmparser",
+ "wasmparser 0.121.2",
  "wat",
 ]
 
@@ -10592,6 +10604,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "terminal_size"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11736,6 +11757,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-encoder"
+version = "0.244.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "990065f2fe63003fe337b932cfb5e3b80e0b4d0f5ff650e6985b1048f62c8319"
+dependencies = [
+ "leb128fmt",
+ "wasmparser 0.244.0",
+]
+
+[[package]]
 name = "wasm-streams"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11799,7 +11830,7 @@ dependencies = [
  "thiserror 1.0.69",
  "wasmer-types",
  "wasmer-vm",
- "wasmparser",
+ "wasmparser 0.121.2",
  "windows-sys 0.59.0",
  "xxhash-rust",
 ]
@@ -11909,6 +11940,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.244.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe"
+dependencies = [
+ "bitflags 2.10.0",
+ "hashbrown 0.15.5",
+ "indexmap 2.12.0",
+ "semver 1.0.27",
+ "serde",
+]
+
+[[package]]
+name = "wasmprinter"
+version = "0.244.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09390d7b2bd7b938e563e4bff10aa345ef2e27a3bc99135697514ef54495e68f"
+dependencies = [
+ "anyhow",
+ "termcolor",
+ "wasmparser 0.244.0",
+]
+
+[[package]]
 name = "wasmtimer"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11931,7 +11986,7 @@ dependencies = [
  "leb128",
  "memchr",
  "unicode-width 0.1.14",
- "wasm-encoder",
+ "wasm-encoder 0.32.0",
 ]
 
 [[package]]
