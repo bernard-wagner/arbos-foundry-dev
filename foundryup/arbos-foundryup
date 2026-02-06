@@ -495,14 +495,14 @@ download() {
   if [ -n "$2" ]; then
     # output into $2
     if check_cmd curl; then
-      curl -#o "$2" -L "$1"
+      curl -#fSo "$2" -L "$1"
     else
       wget --show-progress -qO "$2" "$1"
     fi
   else
     # output to stdout
     if check_cmd curl; then
-      curl -#L "$1"
+      curl -#fSL "$1"
     else
       wget --show-progress -qO- "$1"
     fi

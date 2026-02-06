@@ -212,20 +212,20 @@ jobs:
         shell: bash
         run: |
           if [[ "$PLATFORM_NAME" == "linux" || "$PLATFORM_NAME" == "alpine" ]]; then
-            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
-            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+            tar -czvf "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
           elif [ "$PLATFORM_NAME" == "darwin" ]; then
             # We need to use gtar here otherwise the archive is corrupt.
             # See: https://github.com/actions/virtual-environments/issues/2619
-            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
-            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+            gtar -czvf "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast arbos-anvil arbos-chisel
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
           else
             cd "$OUT_DIR"
-            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe arbos-anvil.exe arbos-chisel.exe
-            mv "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
-            printf "file_name=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> "$GITHUB_OUTPUT"
+            7z a -tzip "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe arbos-anvil.exe arbos-chisel.exe
+            mv "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> "$GITHUB_OUTPUT"
           fi
-          printf "foundry_attestation=%s\n" "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.attestation.txt" >> "$GITHUB_OUTPUT"
+          printf "foundry_attestation=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.attestation.txt" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v5
