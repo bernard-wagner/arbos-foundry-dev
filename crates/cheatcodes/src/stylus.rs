@@ -83,6 +83,13 @@ impl Cheatcode for getStylusCodeCall {
     }
 }
 
+impl Cheatcode for getStylusInitCodeCall {
+    fn apply(&self, state: &mut Cheatcodes) -> Result {
+        let Self { artifactPath: path } = self;
+        get_stylus_init_code(state, path)
+    }
+}
+
 impl Cheatcode for brotliCompressCall {
     fn apply(&self, _state: &mut Cheatcodes) -> Result {
         let Self { data } = self;
@@ -281,6 +288,14 @@ fn get_init_code_of_empty_constructor(bytecode: Vec<u8>) -> Vec<u8> {
 fn get_stylus_code(state: &Cheatcodes, path: &str) -> Result {
     let bytecode = get_stylus_bytecode(state, path)?;
     Ok(bytecode.abi_encode())
+}
+
+/// Returns the init code for deploying a Stylus contract via CREATE/CREATE2.
+/// Wraps the compressed Stylus bytecode in valid EVM init code using `get_init_code_of_empty_constructor`.
+fn get_stylus_init_code(state: &Cheatcodes, path: &str) -> Result {
+    let bytecode = get_stylus_bytecode(state, path)?;
+    let init_code = get_init_code_of_empty_constructor(bytecode.to_vec());
+    Ok(Bytes::from(init_code).abi_encode())
 }
 
 /// Compresses the given data using Brotli compression.

@@ -6826,6 +6826,26 @@
     },
     {
       "func": {
+        "id": "getStylusInitCode",
+        "description": "Returns the init code for deploying a Stylus contract via CREATE/CREATE2.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nThe returned bytecode is valid EVM init code that deploys the Stylus runtime code.",
+        "declaration": "function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory);",
+        "visibility": "external",
+        "mutability": "view",
+        "signature": "getStylusInitCode(string)",
+        "selector": "0x7fb2f6d1",
+        "selectorBytes": [
+          127,
+          178,
+          246,
+          209
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
         "id": "getWallets",
         "description": "Returns addresses of available unlocked wallets in the script environment.",
         "declaration": "function getWallets() external view returns (address[] memory wallets);",

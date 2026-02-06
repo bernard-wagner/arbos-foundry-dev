@@ -2046,6 +2046,12 @@ interface Vm {
     #[cheatcode(group = Filesystem)]
     function getStylusCode(string calldata artifactPath) external view returns (bytes memory);
 
+    /// Returns the init code for deploying a Stylus contract via CREATE/CREATE2.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    /// The returned bytecode is valid EVM init code that deploys the Stylus runtime code.
+    #[cheatcode(group = Filesystem)]
+    function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory);
+
     /// Compresses the given data using Brotli compression (quality: 11, window: 22).
     #[cheatcode(group = String)]
     function brotliCompress(bytes calldata data) external pure returns (bytes memory compressed);
