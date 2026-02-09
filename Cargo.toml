@@ -220,7 +220,7 @@ foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
 
 # arbos-revm
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "9b002b02c6f63cdf9047df67a337c2a3561fa0ce", default-features = false }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "39794a701235cdb835efc185e3920ebd032f1bd6", default-features = false }
 
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }
@@ -439,3 +439,6 @@ solar = { package = "solar-compiler", git = "https://github.com/paradigmxyz/sola
 solar-interface = { package = "solar-interface", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
 solar-ast = { package = "solar-ast", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
 solar-sema = { package = "solar-sema", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
+
+[patch."https://github.com/iosiro/arbos-revm"]
+arbos-revm = { path = "../arbos-revm" }
