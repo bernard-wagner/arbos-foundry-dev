@@ -30,6 +30,7 @@ use foundry_evm_core::{
     constants::{
         CALLER, CHEATCODE_ADDRESS, CHEATCODE_CONTRACT_HASH, DEFAULT_CREATE2_DEPLOYER,
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
+        DEFAULT_STYLUS_DEPLOYER, DEFAULT_STYLUS_DEPLOYER_RUNTIME_CODE,
     },
     decode::{RevertDecoder, SkipReason},
     utils::StateChangeset,
@@ -240,6 +241,26 @@ impl Executor {
             trace!(create2=?res.address, "deployed local create2 deployer");
 
             self.set_balance(creator, initial_balance)?;
+        }
+        Ok(())
+    }
+
+    /// Creates the default StylusDeployer contract for local tests and scripts.
+    /// Unlike CREATE2_DEPLOYER (which runs init code), we set runtime code directly since we
+    /// only have the runtime bytecode.
+    pub fn deploy_stylus_deployer(&mut self) -> eyre::Result<()> {
+        trace!("deploying local stylus deployer");
+        let account = self
+            .backend()
+            .basic_ref(DEFAULT_STYLUS_DEPLOYER)?
+            .ok_or_else(|| BackendError::MissingAccount(DEFAULT_STYLUS_DEPLOYER))?;
+
+        if account.code.is_none_or(|code| code.is_empty()) {
+            self.set_code(
+                DEFAULT_STYLUS_DEPLOYER,
+                Bytecode::new_raw(Bytes::from_static(DEFAULT_STYLUS_DEPLOYER_RUNTIME_CODE)),
+            )?;
+            trace!(deployer=?DEFAULT_STYLUS_DEPLOYER, "deployed local stylus deployer");
         }
         Ok(())
     }

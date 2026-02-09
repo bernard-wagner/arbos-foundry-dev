@@ -46,6 +46,7 @@ impl ScriptRunner {
 
             if script_config.evm_opts.fork_url.is_none() {
                 self.executor.deploy_create2_deployer()?;
+                self.executor.deploy_stylus_deployer()?;
             }
         }
 

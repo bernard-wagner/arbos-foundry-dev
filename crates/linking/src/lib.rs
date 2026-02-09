@@ -720,7 +720,7 @@ mod tests {
                         ),
                         (
                             "default/linking/nested/Nested.t.sol:NestedLib",
-                            Address::from_str("0x4182c6ba261accf5dc1202ba47496cfbf0650428")
+                            Address::from_str("0x1c7edef214838be7723eca84ccbe91ee7cbc98cf")
                                 .unwrap(),
                         ),
                     ],
@@ -735,7 +735,7 @@ mod tests {
                         ),
                         (
                             "default/linking/nested/Nested.t.sol:NestedLib",
-                            Address::from_str("0x4182c6ba261accf5dc1202ba47496cfbf0650428")
+                            Address::from_str("0x1c7edef214838be7723eca84ccbe91ee7cbc98cf")
                                 .unwrap(),
                         ),
                     ],

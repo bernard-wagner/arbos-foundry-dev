@@ -188,6 +188,7 @@ impl<'a> ContractRunner<'a> {
         self.executor.set_balance(LIBRARY_DEPLOYER, self.initial_balance())?;
 
         self.executor.deploy_create2_deployer()?;
+        self.executor.deploy_stylus_deployer()?;
 
         // Optionally call the `setUp` function
         if call_setup {
